@@ -4,7 +4,7 @@ A modern `OpenGL` graphics pipeline and rendering showcase.
 ## Tags
 OpenGL 4.6,
 C++20, CMake 3.15,
-SDL2, GLEW, fmt, GLM,
+SDL2, GLAD, GLEW, fmt, GLM,
 MinGW, Visual Studio 2022,
 Public Domain, MIT,
 

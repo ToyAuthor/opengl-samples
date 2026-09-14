@@ -9,7 +9,7 @@ function(make_opengl_binary _name)
 	cmake_parse_arguments(_OGL "" "" "${multiValueArgs}" ${ARGN})
 
 	if(_OGL_UNPARSED_ARGUMENTS)
-		message(FATAL_ERROR "Unknown arguments in toy_BuildExe: ${_OGL_UNPARSED_ARGUMENTS}")
+		message(FATAL_ERROR "Unknown arguments in make_opengl_binary: ${_OGL_UNPARSED_ARGUMENTS}")
 	endif()
 
 	add_executable(${_name} ${_OGL_SOURCES})

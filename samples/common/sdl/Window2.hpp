@@ -2,10 +2,7 @@
 
 namespace sdl{
 
-// 採用了 GLAD
-// https://glad.dav1d.de/
-// https://github.com/Dav1dde/glad
-// https://github.com/dav1dde/glad-web
+// 採用了 GLEW
 class Window
 {
 	public:
@@ -69,15 +66,26 @@ class Window
 				return false;
 			}
 
-			// 用 GLAD 初始化
-			if ( !gladLoadGLLoader( (GLADloadproc)SDL_GL_GetProcAddress ) )
+			glewExperimental = GL_TRUE;
+
+			const GLenum glewResult = glewInit();
+
+			if ( glewResult != GLEW_OK )
 			{
-				fmt::print( "gladLoadGLLoader 初始化失敗\n" );
+				fmt::print( "glewInit 失敗: {}\n", reinterpret_cast<const char*>( glewGetErrorString( glewResult ) ) );
 				destroy();
 				return false;
 			}
 
-			// 確認 OpenGL 版本是不是 4.6 版
+			// 吞掉 glewInit 在 core profile 下產生的假性錯誤 (可能不只一個)
+			while ( glGetError() != GL_NO_ERROR )
+			{
+				;
+			}
+
+			// 第二次確認，透過 GLEW 來確認 OpenGL 是不是 4.6 版
+			// 但是 GLEW_VERSION_4_6 有可能會錯亂，並不可靠，用 glGetIntegerv 直接問顯卡更實在
+			//if ( !GLEW_VERSION_4_6 )
 			{
 				GLint major = 0;
 				GLint minor = 0;
@@ -100,14 +108,14 @@ class Window
 				fmt::print( "無法啟用 VSync: {}\n", SDL_GetError() );
 			}
 
-			if ( !GLAD_GL_ARB_direct_state_access )
+			if ( !GLEW_ARB_direct_state_access )
 			{
 				fmt::print( "此驅動不支援 ARB_direct_state_access\n" );
 				destroy();
 				return false;
 			}
 
-			if ( !GLAD_GL_ARB_bindless_texture )
+			if ( !GLEW_ARB_bindless_texture )
 			{
 				fmt::print( "此驅動不支援 ARB_bindless_texture\n" );
 				destroy();
@@ -115,7 +123,7 @@ class Window
 			}
 
 			// glDebugMessageCallback 自 GL 4.3 起為核心功能
-			if ( GLAD_GL_KHR_debug || GLAD_GL_ARB_debug_output )
+			if ( GLEW_KHR_debug || GLEW_ARB_debug_output )
 			{
 				glEnable( GL_DEBUG_OUTPUT );
 				glEnable( GL_DEBUG_OUTPUT_SYNCHRONOUS );

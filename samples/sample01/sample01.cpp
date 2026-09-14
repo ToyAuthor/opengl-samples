@@ -1,6 +1,6 @@
 #include <string>
 #include <fmt/core.h>    // 提供 fmt::print 來取代 std::printf
-#include <GL/glew.h>     // 用來確認你電腦上的 OpenGL 版本，並準備相對應的 API 給你使用
+#include <glad/glad.h>   // 用來確認你電腦上的 OpenGL 版本，並準備相對應的 API 給你使用
 #include <SDL.h>         // 負責建立視窗、處理來自作業系統的 event
 
 #include "sdl/Window.hpp"         // 寫在 "opengl-samples/samples/common"，將 SDL2 的視窗工作、OpenGL 初始行為給包裝起來
