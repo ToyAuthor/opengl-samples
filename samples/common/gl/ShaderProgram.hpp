@@ -37,7 +37,10 @@ class ShaderProgram
 			}
 		}
 
-		~ShaderProgram(){}
+		~ShaderProgram()
+		{
+			release();
+		}
 
 		void use()
 		{
@@ -49,9 +52,13 @@ class ShaderProgram
 			glUseProgram(0);
 		}
 
-		void deleteProgram()
+		void release()
 		{
-			glDeleteProgram( _id );
+			if ( _id != 0 )
+			{
+				glDeleteProgram( _id );
+				_id = 0;
+			}
 		}
 
 		GLuint getID()

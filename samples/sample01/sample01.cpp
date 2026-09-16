@@ -132,7 +132,6 @@ int main2()
 
 	glDeleteVertexArrays( 1, &VAO );
 	glDeleteBuffers( 1, &VBO );
-	myShader.deleteProgram();
 
 	return EXIT_SUCCESS;
 }
