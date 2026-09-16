@@ -1,0 +1,5 @@
+*.c linguist-vendored=true
+*.h linguist-vendored=true
+*.cmake linguist-vendored=true
+extlibs/* linguist-vendored=true
+* text=auto
