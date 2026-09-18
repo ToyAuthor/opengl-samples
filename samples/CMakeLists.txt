@@ -4,4 +4,12 @@
 # 描繪最基本的三角形
 add_subdirectory(sample01)
 
+# 用非同步方式將頂點資料、矩陣傳送至顯卡
+# 使用 FPS 遊戲方式操作視角
 add_subdirectory(sample02)
+
+# 用非同步方式將矩陣、材質貼圖傳送至顯卡
+# 頂點資料改為靜態用法
+# 使用 FPS 遊戲方式操作視角
+# 使用 texture array 來儲存圖片
+add_subdirectory(sample03)

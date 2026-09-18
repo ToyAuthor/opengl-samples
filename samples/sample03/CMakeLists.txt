@@ -1,4 +1,4 @@
-project(sample02)
+project(sample03)
 
 set(INC_DIR
 	${opengl_samples_SOURCE_DIR}/extlibs/include
@@ -7,7 +7,7 @@ set(INC_DIR
 )
 
 set(SOURCE
-	sample02.cpp
+	sample03.cpp
 	${opengl_samples_SOURCE_DIR}/samples/common/gl/StreamingBuffer.cpp
 	${opengl_samples_SOURCE_DIR}/extlibs/src/glad/glad.c
 )
@@ -23,7 +23,7 @@ elseif(WIN32)
 	list(APPEND LINK_LIB opengl32 glu32 gdi32)
 endif()
 
-make_opengl_binary(sample02
+make_opengl_binary(sample03
 	INC_DIRS    ${INC_DIR}
 	SOURCES     ${SOURCE}
 	LINK_LIBS   ${LINK_LIB}

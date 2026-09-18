@@ -88,6 +88,7 @@ class VertexArray
         // stride：每個頂點所佔的 bytes 數
         void bindVertexBuffer( GLuint bindingIndex, GLuint buffer, GLintptr offset, GLsizei stride )
         {
+            // 直接把 VBO 釘到 VAO 的第 bindingIndex 個綁定槽
             glVertexArrayVertexBuffer( _id, bindingIndex, buffer, offset, stride );
         }
 

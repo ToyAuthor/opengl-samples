@@ -18,6 +18,8 @@ class StreamingBuffer
 		// GL_SHADER_STORAGE_BUFFER 也就是 SSBO
 		// GL_ATOMIC_COUNTER_BUFFER 也就是 Atomic Counter
 		// GL_TRANSFORM_FEEDBACK_BUFFER 也就是 Transform Feedback
+		// GL_ARRAY_BUFFER
+		// GL_DRAW_INDIRECT_BUFFER
 		// slotSize 為單一槽位所需大小，內部會依 target 的對齊需求向上取整
 		StreamingBuffer(GLenum target, size_t slotSize, int ringCount = 3);
 		~StreamingBuffer();
@@ -61,11 +63,11 @@ class StreamingBuffer
 
 		GLenum               _target;
 		GLuint               _bufferId;
-		void*                _mappedPtr;
+		void*                _mappedPtr;   // 記住跟 OpenGL 申請的記憶體空間，CPU 可以直接寫入
 		size_t               _slotSize;
 		int                  _ringCount;
 		int                  _index;
-		std::vector<GLsync>  _fences;
+		std::vector<GLsync>  _fences;      // 是個指標清單，一個指標對應一個槽位，指標為 nullptr 表示該槽位可用
 };
 
 }

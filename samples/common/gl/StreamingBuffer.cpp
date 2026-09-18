@@ -1,5 +1,7 @@
-#include <utility>   // 為了 std::move 而引入的
+#include <utility>   // 為了使用 std::move 而引入的
 #include <fmt/core.h>
+#include "gl/ImageData.hpp"
+#include "gl/CreateImage.hpp"
 #include "gl/StreamingBuffer.hpp"
 
 namespace {
@@ -30,8 +32,15 @@ size_t QueryAlignment( GLenum target )
 
 		case GL_ARRAY_BUFFER:
 			// 頂點緩衝區（VBO）沒有硬性規定的 offset alignment，
-			// 這裡以 4 bytes（float 的大小）對齊即可滿足絕大多數頂點格式
+			// 這裡以 4 bytes(float 的大小) 對齊即可滿足絕大多數頂點格式
 			align = static_cast< GLint >( sizeof( float ) );
+			break;
+
+		case GL_DRAW_INDIRECT_BUFFER:
+			// Indirect Draw Command Buffer(給 glMultiDrawElementsIndirect 用)
+			// 規格並未提供可查詢的 offset alignment 常數，
+			// 只要求 offset 必須是 4 的倍數(GLuint 大小)
+			align = static_cast< GLint >( sizeof( GLuint ) );
 			break;
 
 		default:
@@ -59,8 +68,7 @@ gl::StreamingBuffer::StreamingBuffer( GLenum target, size_t slotSize, int ringCo
 	_slotSize = AlignUp( slotSize, QueryAlignment( target ) );
 
 	// storage flags：只能給 glNamedBufferStorage 合法使用的位元
-	const GLbitfield storageFlags =
-		GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
+	const GLbitfield storageFlags = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
 
 	// map flags：額外加上 UNSYNCHRONIZED，因為同步已由 _fences 手動管理，
 	// 避免驅動在 map 階段做多餘的隱性等待
@@ -170,11 +178,12 @@ void* gl::StreamingBuffer::beginWrite()
 
 	if ( fence != nullptr )
 	{
-		// 先以 0 timeout 試探，正常情況直接通過；未完成才進入無限等待（改用 GL_TIMEOUT_IGNORED 交由驅動處理）
+		// 先以 0 timeout 試探，查詢是否 GPU 已完成該槽位的使用
 		GLenum result = glClientWaitSync( fence, GL_SYNC_FLUSH_COMMANDS_BIT, 0 );
 
 		if ( result == GL_TIMEOUT_EXPIRED )
 		{
+			// GPU 尚未完成，進入無限等待直到完成
 			glClientWaitSync( fence, GL_SYNC_FLUSH_COMMANDS_BIT, GL_TIMEOUT_IGNORED );
 		}
 
@@ -193,8 +202,7 @@ void gl::StreamingBuffer::endWrite()
 	}
 
 	// COHERENT 對應，不需 glFlushMappedBufferRange
-	_fences[ static_cast< size_t >( _index ) ] =
-		glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
+	_fences[ static_cast< size_t >( _index ) ] = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
 
 	_index = ( _index + 1 ) % _ringCount;
 }
@@ -206,9 +214,7 @@ void gl::StreamingBuffer::bindRange( GLuint bindingIndex ) const
 		return;
 	}
 
-	glBindBufferRange(
-		_target, bindingIndex, _bufferId,
-		getCurrentOffset(), static_cast< GLsizeiptr >( _slotSize ) );
+	glBindBufferRange( _target, bindingIndex, _bufferId, getCurrentOffset(), static_cast<GLsizeiptr>( _slotSize ) );
 }
 
 GLuint gl::StreamingBuffer::getBufferId() const

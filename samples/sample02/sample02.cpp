@@ -32,7 +32,6 @@ const char* VertexShaderSource = R"(
 	}
 )";
 
-// 片元著色器
 const char* FragmentShaderSource = R"(
 	#version 460 core
 
@@ -74,7 +73,7 @@ void handleKeyboardInput( gl::Camera& camera, float deltaTime )
 
 int main2()
 {
-	sdl::Window app;   // 使用 SDL2 來建立視窗
+	sdl::Window app;
 
 	if ( false == app.init( "sample 01", WindowWidth, WindowHeight ) )
 	{
@@ -160,10 +159,7 @@ int main2()
 		const float timeValue = static_cast<float>( SDL_GetTicks() ) / 1000.0f;
 
 		// 將 timeValue 傳送進 fragmentShaderSource 內的 timeOffset
-		glProgramUniform1f(
-			myShader.getID(),
-			0,   // 數字 0 對應著 layout(location = 0)
-			timeValue );
+		glProgramUniform1f( myShader.getID(), 0, timeValue );
 
 		// 非同步上傳 Camera 矩陣至 UBO，並綁定到 binding = 0
 		const float aspectRatio = static_cast<float>( WindowWidth ) / static_cast<float>( WindowHeight );
@@ -196,11 +192,6 @@ int main2()
 			vertexBuffer.endWrite();
 		}
 
-		/*
-		 * 更新螢幕
-		 * 如果你的螢幕裝置是 60 赫茲更新率的話
-		 * 這裡就要花費 1/60 秒來更新視窗畫面
-		 */
 		app.refresh();
 	}
 
@@ -213,7 +204,7 @@ int main2()
 
 }
 
-#undef main // 阻止 SDL2 使用 marco 來修改 "main" 這個名稱
+#undef main
 int main()
 {
 	int result = EXIT_FAILURE;
