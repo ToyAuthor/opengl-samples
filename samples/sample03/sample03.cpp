@@ -3,7 +3,9 @@
 #include <fmt/core.h>
 #include <glad/glad.h>
 #include <SDL.h>
+#include "sdl/Utils.hpp"
 #include "sdl/Window.hpp"
+#include "gl/Utils.hpp"
 #include "gl/ShaderProgram.hpp"
 #include "gl/StreamingBuffer.hpp"
 #include "gl/VertexArray.hpp"
@@ -14,21 +16,24 @@
 namespace{
 
 /*
- * aOffsetScale / aLayerIndex 為 instanced 屬性
- * 各自代表每個四邊形的世界座標偏移、縮放
- * 以及要取樣的 texture array layer
+ * aOffsetScale / aLayerIndex / aMaterialIndex 為 instanced 屬性
+ * 各自代表每個四邊形的世界座標偏移、縮放、
+ * 要取樣的 texture array layer，
+ * 以及要使用哪一組 texture array(對應 SSBO 中的 handle 索引)
  */
 const char* VertexShaderSource = R"(
 	#version 460 core
-	#extension GL_ARB_bindless_texture : require
+	#extension GL_ARB_bindless_texture : require  // 允許在 shader 中使用 bindless texture
 
 	layout (location = 0) in vec2 aPos;
 	layout (location = 1) in vec2 aUV;
-	layout (location = 2) in vec4 aOffsetScale; // xyz = 世界座標偏移, w = 縮放
+	layout (location = 2) in vec4 aOffsetScale;   // xyz = 世界座標偏移, w = 縮放
 	layout (location = 3) in int  aLayerIndex;
+	layout (location = 4) in int  aMaterialIndex; // 對應 SSBO 中第幾組 texture array
 
 	layout (location = 0) out vec2 vUV;
 	layout (location = 1) flat out int vLayer;
+	layout (location = 2) flat out int vMaterial;
 
 	// 使用 Camera 傳來的 View / Projection 矩陣（std140 UBO）
 	layout (std140, binding = 0) uniform CameraBlock
@@ -43,53 +48,65 @@ const char* VertexShaderSource = R"(
 		vec3 worldPos = vec3( aPos * aOffsetScale.w, 0.0 ) + aOffsetScale.xyz;
 		gl_Position = camera.viewProjection * vec4( worldPos, 1.0 );
 
-		vUV    = aUV;
-		vLayer = aLayerIndex;
+		vUV       = aUV;
+		vLayer    = aLayerIndex;
+		vMaterial = aMaterialIndex;
 	}
 )";
 
-// 透過 Bindless Texture Handle 存取 texture array
-// 不需要在 CPU 端呼叫 glBindTexture
+/*
+ * bindless handle 陣列改存在 SSBO 中(std430)
+ * ARB_bindless_texture 允許把 sampler 型別直接放進 buffer block
+ * 因為 sampler 底層本質上就是 64-bit 的 handle
+ * 這是用來管理大量材質 handle 的做法
+ * 不需要每個材質各自佔一個 uniform location
+ */
 const char* FragmentShaderSource = R"(
 	#version 460 core
 	#extension GL_ARB_bindless_texture : require
 
 	layout (location = 0) in  vec2 vUV;
 	layout (location = 1) flat in int vLayer;
+	layout (location = 2) flat in int vMaterial;
 	layout (location = 0) out vec4 FragColor;
 
-	layout (bindless_sampler) uniform sampler2DArray texArray;
+	layout (std430, binding = 1) readonly buffer TextureBlock
+	{
+		sampler2DArray texArrays[];
+	};
 
 	void main()
 	{
-		FragColor = texture( texArray, vec3( vUV, float( vLayer ) ) );
+		FragColor = texture( texArrays[ vMaterial ], vec3( vUV, float( vLayer ) ) );
 	}
 )";
 
-// 一個共用的單位四邊形（-0.5 ~ 0.5），position + uv
+// 一個共用的單位四邊形(-0.5 ~ 0.5)，位置 + UV(texture座標)
 constexpr float QuadVertices[] = {
-	// pos            // uv
-	-0.5f,  0.5f,      0.0f, 1.0f,
-	 0.5f,  0.5f,      1.0f, 1.0f,
-	 0.5f, -0.5f,      1.0f, 0.0f,
-	-0.5f, -0.5f,      0.0f, 0.0f,
+	// 位置         // UV
+	-0.5f,  0.5f,   0.0f, 1.0f,
+	 0.5f,  0.5f,   1.0f, 1.0f,
+	 0.5f, -0.5f,   1.0f, 0.0f,
+	-0.5f, -0.5f,   0.0f, 0.0f,
 };
 
 constexpr GLuint QuadIndices[] = { 0, 1, 2, 2, 3, 0 };
 
 constexpr size_t QuadVertexStride = 4 * sizeof( float );
 
-// 每個 instance（四邊形）各自的資料：世界座標偏移 + 縮放 + texture layer
+// 每個 instance(四邊形)各自的資料：
+// 世界座標偏移 + 縮放 + texture layer + 要使用哪一組 texture array
 struct InstanceData
 {
 	glm::vec3 offset;
 	float     scale;
 	int       layerIndex;
+	int       materialIndex; // 0 = TextureManager A, 1 = TextureManager B
 };
 
 constexpr size_t InstanceStride = sizeof( InstanceData );
 
-// 對應 glMultiDrawElementsIndirect 所需的 command 結構
+// 對應 glMultiDrawElementsIndirect 時所需的 command 結構
 struct DrawElementsIndirectCommand
 {
 	GLuint count;
@@ -99,12 +116,21 @@ struct DrawElementsIndirectCommand
 	GLuint baseInstance;
 };
 
+// SSBO 中儲存的 texture handle 陣列結構(需與 shader 中的 TextureBlock 對應)
+struct TextureHandleBlock
+{
+	GLuint64 texArrays[2]; // 2 組 texture array 的 bindless handle
+};
+
 constexpr int WindowWidth  = 800;
 constexpr int WindowHeight = 600;
-constexpr int ImageCount   = 4;   // 本範例要顯示的圖片數量
+
+constexpr int ImageCountA    = 4; // Texture Array A：128x128，4 張
+constexpr int ImageCountB    = 3; // Texture Array B：256x256，3 張
+constexpr int TotalImageCount = ImageCountA + ImageCountB;
 
 // 依照 Camera::Movement 對應鍵盤按鍵，統一在此處理輸入
-void handleKeyboardInput( gl::Camera& camera, float deltaTime )
+void HandleKeyboardInput( gl::Camera& camera, float deltaTime )
 {
 	const Uint8* state = SDL_GetKeyboardState( nullptr );
 
@@ -132,19 +158,37 @@ int main2()
 
 	//--------------------------------------------------------------------------
 
-	gl::TextureManager  textureManager;
+	// Texture Array A：128x128，4 張圖片
+	gl::TextureManager  textureManagerA;
 
-	// 建立 4 張圖片的 texture array + bindless handle
-	if ( !textureManager.build( { "brick", "grass", "sand", "water" } ) )
+	if ( !textureManagerA.build( { "brick", "grass", "sand", "water" }, 128, 128 ) )
 	{
-		fmt::print( "TextureManager 建立失敗\n" );
+		fmt::print( "TextureManager A 建立失敗\n" );
 		return EXIT_FAILURE;
 	}
 
-	// 把 bindless handle 傳給 fragment shader 的 sampler2DArray（全域只需設定一次）
+	// Texture Array B：256x256，3 張圖片(尺寸與圖片數量都與 A 不同)
+	gl::TextureManager  textureManagerB;
+
+	if ( !textureManagerB.build( { "lava", "stone", "wood" }, 256, 256 ) )
 	{
-		const GLint texArrayLoc = glGetUniformLocation( myShader.getID(), "texArray" );
-		glProgramUniformHandleui64ARB( myShader.getID(), texArrayLoc, textureManager.getHandle() );
+		fmt::print( "TextureManager B 建立失敗\n" );
+		return EXIT_FAILURE;
+	}
+
+	//--------------------------------------------------------------------------
+
+	// 使用 StreamingBuffer 來管理 SSBO，儲存兩組 bindless texture handle
+	// binding point = 1，每幀可更新(雖然這個例子中不需要)
+	gl::StreamingBuffer textureHandleSSBO(
+		GL_SHADER_STORAGE_BUFFER,
+		sizeof( TextureHandleBlock ),
+		3 );
+
+	if ( !textureHandleSSBO.isValid() )
+	{
+		fmt::print( "Texture Handle SSBO 建立失敗(驅動可能不支援 ARB_buffer_storage)\n" );
+		return EXIT_FAILURE;
 	}
 
 	//--------------------------------------------------------------------------
@@ -163,28 +207,32 @@ int main2()
 	VAO.bindElementBuffer( quadEBO );
 	VAO.bindVertexBuffer( 0, quadVBO, 0, static_cast<GLsizei>( QuadVertexStride ) );
 
-	// binding 0：共用四邊形頂點（pos + uv）
+	// binding 0：共用四邊形 vertex(位置 + UV)
 	VAO.enableAttrib( 0 );
 	VAO.enableAttrib( 1 );
 	VAO.setAttribFormat( 0, 2, GL_FLOAT, GL_FALSE, 0 );
 	VAO.setAttribFormat( 1, 2, GL_FLOAT, GL_FALSE, 2 * sizeof( float ) );
 	VAO.setAttribBinding( 0, 0 );
 	VAO.setAttribBinding( 1, 0 );
+//	VAO.setBindingDivisor( 0, 0 );   // binding 0 的 divisor = 0，表示每個 vertex 都要更新一次，預設已經是0了
 
-	// binding 1：instanced 屬性（每個 instance 各自的偏移/縮放/layer）
+	// binding 1：instanced 屬性(每個 instance 各自的偏移/縮放/layer/材質索引)
 	VAO.enableAttrib( 2 );
 	VAO.enableAttrib( 3 );
+	VAO.enableAttrib( 4 );
 	VAO.setAttribFormat( 2, 4, GL_FLOAT, GL_FALSE, offsetof( InstanceData, offset ) );
 	VAO.setAttribIFormat( 3, 1, GL_INT, offsetof( InstanceData, layerIndex ) );
+	VAO.setAttribIFormat( 4, 1, GL_INT, offsetof( InstanceData, materialIndex ) );
 	VAO.setAttribBinding( 2, 1 );
 	VAO.setAttribBinding( 3, 1 );
-	VAO.setBindingDivisor( 1, 1 ); // 每個 instance 更新一次
+	VAO.setAttribBinding( 4, 1 );
+	VAO.setBindingDivisor( 1, 1 ); // binding 1 的 divisor = 1，每個 instance 更新一次(一張圖片就是一個 instance)
 
 	//--------------------------------------------------------------------------
 
 	gl::StreamingBuffer cameraBuffer( GL_UNIFORM_BUFFER, sizeof( gl::Camera::UniformBlock ), 3 );
-	gl::StreamingBuffer instanceBuffer( GL_ARRAY_BUFFER, sizeof( InstanceData ) * ImageCount, 3 );
-	gl::StreamingBuffer indirectBuffer( GL_DRAW_INDIRECT_BUFFER, sizeof( DrawElementsIndirectCommand ) * ImageCount, 3 );
+	gl::StreamingBuffer instanceBuffer( GL_ARRAY_BUFFER, sizeof( InstanceData ) * TotalImageCount, 3 );
+	gl::StreamingBuffer indirectBuffer( GL_DRAW_INDIRECT_BUFFER, sizeof( DrawElementsIndirectCommand ) * TotalImageCount, 3 );
 
 	if ( !cameraBuffer.isValid() || !instanceBuffer.isValid() || !indirectBuffer.isValid() )
 	{
@@ -194,23 +242,26 @@ int main2()
 
 	//--------------------------------------------------------------------------
 
-	// 建立攝影機，往 +Z 退開才能看到排列在 Z = 0 平面上的四張圖片
-	gl::Camera camera( glm::vec3( 0.0f, 0.0f, 3.0f ) );
+	// 建立攝影機，往 +Z 退開才能看到排列在 Z = 0 平面上的圖片
+	gl::Camera camera( glm::vec3( 0.0f, 0.0f, 4.0f ) );
 
-	constexpr GLuint CameraBindingIndex = 0;
-
-	// 四張圖片排成 2x2 網格，各自對應 texture array 的 layer 0~3
-	constexpr glm::vec3 QuadOffsets[ImageCount] = {
-		{ -0.6f,  0.6f, 0.0f },
-		{  0.6f,  0.6f, 0.0f },
-		{ -0.6f, -0.6f, 0.0f },
-		{  0.6f, -0.6f, 0.0f },
+	// 上排 4 張對應 Texture Array A，下排 3 張對應 Texture Array B
+	constexpr glm::vec3 QuadOffsets[TotalImageCount] = {
+		// Texture Array A（128x128, 4 張）
+		{ -1.35f,  0.6f, 0.0f },
+		{ -0.45f,  0.6f, 0.0f },
+		{  0.45f,  0.6f, 0.0f },
+		{  1.35f,  0.6f, 0.0f },
+		// Texture Array B（256x256, 3 張）
+		{ -0.9f, -0.6f, 0.0f },
+		{  0.0f, -0.6f, 0.0f },
+		{  0.9f, -0.6f, 0.0f },
 	};
 
-	constexpr float QuadScale = 1.0f;
+	constexpr float QuadScale = 0.8f;
 	bool            quit     = false;
-	SDL_Event       msg;
-	Uint32          lastTick = SDL_GetTicks();
+	SDL_Event       event;
+	float           lastTick = sdl::GetTick();
 
 	/*
 	 * 這迴圈的工作就兩件事：
@@ -219,92 +270,122 @@ int main2()
 	 */
 	while ( false == quit )
 	{
-		const Uint32 currentTick = SDL_GetTicks();
-		const float  deltaTime   = static_cast<float>( currentTick - lastTick ) / 1000.0f;
+		const float currentTick = sdl::GetTick();
+		const float deltaTime   = currentTick - lastTick;
 		lastTick = currentTick;
 
 		// 處理來自作業系統的 event
-		while ( SDL_PollEvent( &msg ) != 0 )
+		while ( SDL_PollEvent( &event ) != 0 )
 		{
-			if ( msg.type == SDL_QUIT ) quit = true;
-
-			if ( msg.type == SDL_MOUSEMOTION )
+			switch ( event.type )
 			{
-				camera.processMouseMovement(
-					static_cast<float>( msg.motion.xrel ),
-					static_cast<float>( -msg.motion.yrel ) );
+				case SDL_QUIT:
+					quit = true;
+					break;
+				case SDL_MOUSEMOTION:
+					camera.processMouseMovement(
+						static_cast<float>(  event.motion.xrel ),
+						static_cast<float>( -event.motion.yrel ) );
+					break;
+				default:
+					break;
 			}
 		}
 
-		handleKeyboardInput( camera, deltaTime );
+		HandleKeyboardInput( camera, deltaTime );
 
-		// 渲染：DSA 版本的清除畫面 (0 代表預設 framebuffer)
-		constexpr GLfloat clearColor[4] = { 0.1f, 0.1f, 0.1f, 1.0f };
-		glClearNamedFramebufferfv( 0, GL_COLOR, 0, clearColor );
+		gl::ClearScreen();
 
 		// 非同步上傳 Camera 矩陣至 UBO，並綁定到 binding = 0
 		const float aspectRatio = static_cast<float>( WindowWidth ) / static_cast<float>( WindowHeight );
-		camera.uploadToUBO( cameraBuffer, aspectRatio, CameraBindingIndex );
+		camera.uploadToUBO( cameraBuffer, aspectRatio, 0 );
 
-		// 非同步寫入 4 個 instance 的資料（位置 / 縮放 / layer index）
-		void* instanceDst = instanceBuffer.beginWrite();
+		// 非同步寫入 texture handle 至 SSBO，並綁定到 binding = 1
+		void* textureHandleDst = textureHandleSSBO.beginWrite();
 
-		if ( instanceDst != nullptr )
+		if ( textureHandleDst != nullptr )
 		{
-			InstanceData instances[ImageCount];
+			TextureHandleBlock handles;
+			handles.texArrays[0] = textureManagerA.getHandle();
+			handles.texArrays[1] = textureManagerB.getHandle();
 
-			for ( int i = 0; i < ImageCount; ++i )
+			std::memcpy( textureHandleDst, &handles, sizeof( handles ) );
+
+			textureHandleSSBO.bindRange( 1 );
+			textureHandleSSBO.endWrite();
+
+			// 非同步寫入所有 instance 的資料(位置 / 縮放 / layer index / 材質索引)
+			void* instanceDst = instanceBuffer.beginWrite();
+
+			if ( instanceDst != nullptr )
 			{
-				instances[i].offset     = QuadOffsets[i];
-				instances[i].scale      = QuadScale;
-				instances[i].layerIndex = i;
-			}
+				InstanceData instances[TotalImageCount];
+				int          idx = 0;
 
-			std::memcpy( instanceDst, instances, sizeof( instances ) );
-
-			VAO.bindVertexBuffer(
-				1,
-				instanceBuffer.getBufferId(),
-				instanceBuffer.getCurrentOffset(),
-				static_cast<GLsizei>( InstanceStride ) );
-
-			instanceBuffer.endWrite();
-
-			// 非同步寫入 Indirect Draw Command：
-			// 每張圖片各自一筆 command，instanceCount = 1，
-			// baseInstance = i 讓 instanced 屬性剛好對應到第 i 筆 InstanceData
-			void* indirectDst = indirectBuffer.beginWrite();
-
-			if ( indirectDst != nullptr )
-			{
-				DrawElementsIndirectCommand commands[ImageCount];
-
-				for ( GLuint i = 0; i < ImageCount; ++i )
+				// Texture Array A：materialIndex = 0
+				for ( int i = 0; i < ImageCountA; ++i, ++idx )
 				{
-					commands[i].count         = static_cast<GLuint>( std::size( QuadIndices ) );
-					commands[i].instanceCount = 1;
-					commands[i].firstIndex    = 0;
-					commands[i].baseVertex    = 0;
-					commands[i].baseInstance  = i;
+					instances[idx].offset        = QuadOffsets[idx];
+					instances[idx].scale         = QuadScale;
+					instances[idx].layerIndex    = i;
+					instances[idx].materialIndex = 0;
 				}
 
-				std::memcpy( indirectDst, commands, sizeof( commands ) );
+				// Texture Array B：materialIndex = 1
+				for ( int i = 0; i < ImageCountB; ++i, ++idx )
+				{
+					instances[idx].offset        = QuadOffsets[idx];
+					instances[idx].scale         = QuadScale;
+					instances[idx].layerIndex    = i;
+					instances[idx].materialIndex = 1;
+				}
 
-				myShader.use();
-				VAO.bind();
+				std::memcpy( instanceDst, instances, sizeof( instances ) );
 
-				glBindBuffer( GL_DRAW_INDIRECT_BUFFER, indirectBuffer.getBufferId() );
+				VAO.bindVertexBuffer(
+					1,
+					instanceBuffer.getBufferId(),
+					instanceBuffer.getCurrentOffset(),
+					static_cast<GLsizei>( InstanceStride ) );
 
-				// 一次呼叫，透過 indirect buffer 描述的 4 筆 command
-				// 分別繪製 4 張圖片（各自對應不同的 texture array layer）
-				glMultiDrawElementsIndirect(
-					GL_TRIANGLES,
-					GL_UNSIGNED_INT,
-					reinterpret_cast<const void*>( indirectBuffer.getCurrentOffset() ),
-					ImageCount,
-					sizeof( DrawElementsIndirectCommand ) );
+				instanceBuffer.endWrite();
 
-				indirectBuffer.endWrite();
+				// 非同步寫入 Indirect Draw Command：
+				// 每張圖片各自一筆 command，instanceCount = 1，
+				// baseInstance = i 讓 instanced 屬性剛好對應到第 i 筆 InstanceData
+				void* indirectDst = indirectBuffer.beginWrite();
+
+				if ( indirectDst != nullptr )
+				{
+					DrawElementsIndirectCommand commands[TotalImageCount];
+
+					for ( GLuint i = 0; i < TotalImageCount; ++i )
+					{
+						commands[i].count         = static_cast<GLuint>( std::size( QuadIndices ) );
+						commands[i].instanceCount = 1;
+						commands[i].firstIndex    = 0;
+						commands[i].baseVertex    = 0;
+						commands[i].baseInstance  = i;
+					}
+
+					std::memcpy( indirectDst, commands, sizeof( commands ) );
+
+					myShader.use();
+					VAO.bind();
+
+					glBindBuffer( GL_DRAW_INDIRECT_BUFFER, indirectBuffer.getBufferId() );
+
+					// 一次呼叫，透過 indirect buffer 描述的多筆 command
+					// 分別繪製各張圖片(各自對應不同的 texture array 及 layer)
+					glMultiDrawElementsIndirect(
+						GL_TRIANGLES,
+						GL_UNSIGNED_INT,
+						reinterpret_cast<const void*>( indirectBuffer.getCurrentOffset() ),
+						TotalImageCount,
+						sizeof( DrawElementsIndirectCommand ) );
+
+					indirectBuffer.endWrite();
+				}
 			}
 		}
 

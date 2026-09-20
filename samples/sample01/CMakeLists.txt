@@ -7,13 +7,13 @@ set(INC_DIR
 	${opengl_samples_LINK_DIRS}
 )
 
+# 編譯程式所必需的 source code
 set(SOURCE
 	sample01.cpp
 	${opengl_samples_SOURCE_DIR}/extlibs/src/glad/glad.c
 )
 
-# 編譯程式所必需連結的 library 名稱
-# library 資料夾位置寫在 opengl_samples_LINK_DIRS 上面了
+# 編譯程式所必須連結的 library 名稱
 set(LINK_LIB
 	#glew
 	fmt
@@ -21,7 +21,7 @@ set(LINK_LIB
 )
 
 # 這些是作業系統提供的 library
-# Linux 與 Windows 平台所需要添加的 library 不一樣
+# Linux 與 Windows 平台所需要連結的 library 不一樣
 if(UNIX)
 	list(APPEND LINK_LIB GL GLU X11)
 elseif(WIN32)

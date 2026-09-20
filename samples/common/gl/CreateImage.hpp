@@ -5,14 +5,14 @@
 
 namespace gl{
 
-// 圖檔產生器
-// 按照 name 這個字串的內容來隨便產生一張圖片
+// 按照 name 這個字串的內容以及 img 所記錄的圖片尺寸來產生一張圖片
 inline void CreateImage( const std::string& name, ::gl::ImageData& img )
 {
-	img.width    = 128;
-	img.height   = 128;
-	img.channels = 4;
-	img.pixels.resize( img.width * img.height * 4 );
+	// 若外部未指定尺寸，使用預設值
+	if ( img.width <= 0 )  img.width = 128;
+	if ( img.height <= 0 ) img.height = 128;
+
+	img.pixels.resize( img.width * img.height * img.channels );
 
 	uint32_t seed = 2166136261u;
 
@@ -22,8 +22,8 @@ inline void CreateImage( const std::string& name, ::gl::ImageData& img )
 		seed *= 16777619u;
 	}
 
-	unsigned char r = static_cast<unsigned char>( ( seed >>  0 ) & 255 );
-	unsigned char g = static_cast<unsigned char>( ( seed >>  8 ) & 255 );
+	unsigned char r = static_cast<unsigned char>( ( seed >> 0 ) & 255 );
+	unsigned char g = static_cast<unsigned char>( ( seed >> 8 ) & 255 );
 	unsigned char b = static_cast<unsigned char>( ( seed >> 16 ) & 255 );
 
 	for ( int y = 0; y < img.height; ++y )
@@ -31,7 +31,7 @@ inline void CreateImage( const std::string& name, ::gl::ImageData& img )
 		for ( int x = 0; x < img.width; ++x )
 		{
 			bool checker = ( ( x / 16 ) + ( y / 16 ) ) % 2 == 0;
-			int  i       = ( y * img.width + x ) * 4;
+			int  i = ( y * img.width + x ) * img.channels;
 
 			img.pixels[i + 0] = checker ? r : 255;
 			img.pixels[i + 1] = checker ? g : 255;

@@ -2,7 +2,9 @@
 #include <fmt/core.h>
 #include <glad/glad.h>
 #include <SDL.h>
+#include "sdl/Utils.hpp"
 #include "sdl/Window.hpp"
+#include "gl/Utils.hpp"
 #include "gl/ShaderProgram.hpp"
 #include "gl/StreamingBuffer.hpp"
 #include "gl/VertexArray.hpp"
@@ -10,7 +12,7 @@
 
 namespace{
 
-// 頂點著色器：多加一個 std140 UBO，接收 Camera 傳來的 View / Projection 矩陣
+// vertex 著色器：多加一個 std140 UBO，接收 Camera 傳來的 View / Projection 矩陣
 const char* VertexShaderSource = R"(
 	#version 460 core
 
@@ -48,8 +50,8 @@ const char* FragmentShaderSource = R"(
 // 三角形數據
 constexpr float Vertices[] = {
 	// 位置              // 顏色
-	0.0f,   0.5f, 0.0f,  1.0f, 0.0f, 0.0f,    // 頂部 (紅)
-	0.5f,  -0.5f, 0.0f,  0.0f, 1.0f, 0.0f,    // 右下 (綠)
+	 0.0f,  0.5f, 0.0f,  1.0f, 0.0f, 0.0f,    // 頂部 (紅)
+	 0.5f, -0.5f, 0.0f,  0.0f, 1.0f, 0.0f,    // 右下 (綠)
 	-0.5f, -0.5f, 0.0f,  0.0f, 0.0f, 1.0f     // 左下 (藍)
 };
 
@@ -59,7 +61,7 @@ constexpr int WindowWidth  = 800;
 constexpr int WindowHeight = 600;
 
 // 依照 Camera::Movement 對應鍵盤按鍵，統一在此處理輸入
-void handleKeyboardInput( gl::Camera& camera, float deltaTime )
+void HandleKeyboardInput( gl::Camera& camera, float deltaTime )
 {
 	const Uint8* state = SDL_GetKeyboardState( nullptr );
 
@@ -98,7 +100,7 @@ int main2()
 
 	if ( !vertexBuffer.isValid() || !cameraBuffer.isValid() )
 	{
-		fmt::print( "StreamingBuffer 建立失敗（驅動可能不支援 ARB_buffer_storage）\n" );
+		fmt::print( "StreamingBuffer 建立失敗(驅動可能不支援 ARB_buffer_storage)\n" );
 		return EXIT_FAILURE;
 	}
 
@@ -114,16 +116,14 @@ int main2()
 	VAO.setAttribBinding( 0, 0 );
 	VAO.setAttribBinding( 1, 0 );
 
+	//--------------------------------------------------------------------------
+
 	// 建立攝影機，初始位置往 +Z 退開，才看得到三角形（三角形位於 Z = 0）
 	gl::Camera camera( glm::vec3( 0.0f, 0.0f, 3.0f ) );
 
-	constexpr GLuint CameraBindingIndex = 0;
-
-	//--------------------------------------------------------------------------
-
 	bool       quit     = false;
-	SDL_Event  msg;
-	Uint32     lastTick = SDL_GetTicks();
+	SDL_Event  event;
+	float      lastTick = sdl::GetTick();
 
 	/*
 	 * 這迴圈的工作就兩件事：
@@ -132,38 +132,41 @@ int main2()
 	 */
 	while ( false == quit )
 	{
-		const Uint32 currentTick = SDL_GetTicks();
-		const float  deltaTime   = static_cast<float>( currentTick - lastTick ) / 1000.0f;
+		const float currentTick = sdl::GetTick();
+		const float deltaTime   = currentTick - lastTick;
 		lastTick = currentTick;
 
 		// 處理來自作業系統的 event
-		while ( SDL_PollEvent( &msg ) != 0 )
+		while ( SDL_PollEvent( &event ) != 0 )
 		{
-			if ( msg.type == SDL_QUIT ) quit = true;
-
-			if ( msg.type == SDL_MOUSEMOTION )
+			switch ( event.type )
 			{
-				camera.processMouseMovement(
-					static_cast<float>( msg.motion.xrel ),
-					static_cast<float>( -msg.motion.yrel ) );
+				case SDL_QUIT:
+					quit = true;
+					break;
+				case SDL_MOUSEMOTION:
+					camera.processMouseMovement(
+						static_cast<float>(  event.motion.xrel ),
+						static_cast<float>( -event.motion.yrel ) );
+					break;
+				default:
+					break;
 			}
 		}
 
-		handleKeyboardInput( camera, deltaTime );
+		HandleKeyboardInput( camera, deltaTime );
 
-		// 渲染：DSA 版本的清除畫面 (0 代表預設 framebuffer)
-		constexpr GLfloat clearColor[4] = { 0.1f, 0.1f, 0.1f, 1.0f };
-		glClearNamedFramebufferfv( 0, GL_COLOR, 0, clearColor );
+		gl::ClearScreen();
 
 		// 更新參數：glProgramUniform 不需要先 glUseProgram
-		const float timeValue = static_cast<float>( SDL_GetTicks() ) / 1000.0f;
+		const float timeValue = sdl::GetTick();
 
 		// 將 timeValue 傳送進 fragmentShaderSource 內的 timeOffset
 		glProgramUniform1f( myShader.getID(), 0, timeValue );
 
 		// 非同步上傳 Camera 矩陣至 UBO，並綁定到 binding = 0
 		const float aspectRatio = static_cast<float>( WindowWidth ) / static_cast<float>( WindowHeight );
-		camera.uploadToUBO( cameraBuffer, aspectRatio, CameraBindingIndex );
+		camera.uploadToUBO( cameraBuffer, aspectRatio, 0 );
 
 		// 非同步寫入頂點資料：
 		// beginWrite() 會等待「同一個 ring 槽位」上一次使用它的 GPU 指令執行完畢，
@@ -181,9 +184,7 @@ int main2()
 				vertexBuffer.getCurrentOffset(),
 				static_cast<GLsizei>( VertexStride ) );
 
-			myShader.use(); // 只有在真正要 Draw 的時候才 Bind Program
-
-			// 渲染時只需要綁定 VAO 即可
+			myShader.use();
 			VAO.bind();
 			glDrawArrays( GL_TRIANGLES, 0, 3 );
 

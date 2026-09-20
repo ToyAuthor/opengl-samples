@@ -57,8 +57,9 @@ class TextureManager
 		}
 
 		// 依照 names 清單建立 texture array，每個字串各佔一個 layer
-		// CreateImage 目前固定產生 128x128 RGBA，因此所有 layer 尺寸皆相同
-		bool build( const std::vector<std::string>& names )
+		// width / height 可自訂該組 texture array 的尺寸，
+		// 不同的 TextureManager 實例可以各自使用不同尺寸，彼此互不影響
+		bool build( const std::vector<std::string>& names, int width = 128, int height = 128 )
 		{
 			release();
 
@@ -71,11 +72,11 @@ class TextureManager
 
 			for ( size_t i = 0; i < names.size(); ++i )
 			{
+				images[i].width  = width;
+				images[i].height = height;
 				CreateImage( names[i], images[i] );
 			}
 
-			const int width     = images[0].width;
-			const int height    = images[0].height;
 			const int layers    = static_cast<int>( images.size() );
 			const int mipLevels = 1 + static_cast<int>( std::floor( std::log2( static_cast<float>( std::max( width, height ) ) ) ) );
 
@@ -134,6 +135,7 @@ class TextureManager
 		}
 
 		GLuint    getTextureId() const  { return _textureId; }
+		// 取得 Bindless Texture Handle
 		GLuint64  getHandle() const     { return _handle; }
 		int       getLayerCount() const { return _layerCount; }
 
@@ -167,8 +169,8 @@ class TextureManager
 			rhs._layerCount = 0;
 		}
 
-		GLuint   _textureId  = 0;
-		GLuint64 _handle     = 0;
+		GLuint   _textureId  = 0;   // 紀錄 texture array 的 ID
+		GLuint64 _handle     = 0;   // 紀錄 Bindless Texture Handle，也是種 ID，讓 shader 端可以直接選擇要使用什麼 texture
 		int      _layerCount = 0;
 };
 

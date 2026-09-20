@@ -2,12 +2,15 @@
 
 namespace gl{
 
+// 輸入 shader(著色語言)，編譯成 shader program
+// 最終目標是取得 program ID
 class ShaderProgram
 {
 	public:
 
 		ShaderProgram( const char* vs, const char* fs )
 		{
+			// 編譯 shader
 			GLuint vsID = CompileShader( GL_VERTEX_SHADER, vs );
 			GLuint fsID = CompileShader( GL_FRAGMENT_SHADER, fs );
 
@@ -16,17 +19,17 @@ class ShaderProgram
 			glAttachShader( _id, vsID );
 			glAttachShader( _id, fsID );
 
-			glLinkProgram( _id );
+			glLinkProgram( _id );  // 到這步就完成 shader program 了
 
-			// 連結完成後即可卸載並刪除 shader object，避免資源洩漏
+			// 這裡可以馬上卸載並刪除 shader object 了，避免資源洩漏
 			glDetachShader( _id, vsID );
 			glDetachShader( _id, fsID );
 			glDeleteShader( vsID );
 			glDeleteShader( fsID );
 
-			// 檢查 Program 連結狀態
 			GLint linkSuccess;
 
+			// 檢查 Program 連結狀態
 			glGetProgramiv( _id, GL_LINK_STATUS, &linkSuccess );
 
 			if ( GL_FALSE==linkSuccess )
@@ -42,6 +45,7 @@ class ShaderProgram
 			release();
 		}
 
+		// 讓 GPU 使用這個 shader program 來工作
 		void use()
 		{
 			glUseProgram( _id );

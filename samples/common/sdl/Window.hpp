@@ -41,13 +41,22 @@ class Window
 
 			_sdlInited = true;
 
+			// 設定 OpenGL 版本與 Profile (4.6 Core)
 			SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 4 );
 			SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 6 );
 			SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE );
+			SDL_GL_SetAttribute( SDL_GL_DOUBLEBUFFER, 1 );
+			SDL_GL_SetAttribute( SDL_GL_DEPTH_SIZE, 24 );
+			SDL_GL_SetAttribute( SDL_GL_MULTISAMPLEBUFFERS, 1 );   // 開啟多重採樣來抗鋸齒
+			SDL_GL_SetAttribute( SDL_GL_MULTISAMPLESAMPLES, 4 );   // 設定採樣次數(通常為 4, 8 或 16，數字愈大效果愈好但愈耗效能)
+			SDL_GL_SetAttribute( SDL_GL_STENCIL_SIZE, 8 );         // 有進行 stencil test 才會需要開啟
+			SDL_GL_SetAttribute( SDL_GL_ACCELERATED_VISUAL, 1 );   // 啟用「硬體加速」，通常驅動預設就會啟用
 
-			// 要求 debug context，glDebugMessageCallback 才能完整運作
 		#ifdef _DEBUG
+			// 要求開啟 debug context，glDebugMessageCallback 才能完整運作
 			SDL_GL_SetAttribute( SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG );
+			// 會移除某些舊功能，可有可無的選項
+		//	SDL_GL_SetAttribute( SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG | SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG );
 		#endif
 
 			_window = SDL_CreateWindow( title.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, SDL_WINDOW_OPENGL );
