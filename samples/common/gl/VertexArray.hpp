@@ -1,11 +1,15 @@
 #pragma once
 
-#include <glad/glad.h>
+#include <vector>
 
 namespace gl{
 
+class VertexAttrib;
+class VertexBinding;
+
 // 包裝 VAO(Vertex Array Object)的 DSA 操作
 // 使用 RAII 管理生命週期，禁止複製、允許移動
+// 程式從頭到尾只使用一個 VAO 是可行的
 class VertexArray
 {
 	public:
@@ -97,7 +101,7 @@ class VertexArray
 			glVertexArrayVertexBuffer( _id, bindingIndex, buffer, offset, stride );
 		}
 
-		// 綁定 Element Buffer(IBO / EBO)
+		// 綁定 Element Buffer(EBO)
 		void bindElementBuffer( GLuint buffer )
 		{
 			glVertexArrayElementBuffer( _id, buffer );
@@ -125,6 +129,23 @@ class VertexArray
 			return _id;
 		}
 
+		void addAttrib( GLuint index, gl::VertexAttrib *ptr )
+		{
+			struct AttribNode   node;
+
+			node.ptr = ptr;
+			node.index = index;
+
+			_attribList.push_back(node);
+		}
+
+		GLuint addBinding(::gl::VertexBinding *ptr)
+		{
+			_bindingList.push_back(ptr);
+
+			return static_cast<GLuint>( _bindingList.size() - 1 );
+		}
+
 	private:
 
 		void release()
@@ -138,6 +159,15 @@ class VertexArray
 		}
 
 		GLuint _id = 0;
+
+		struct AttribNode
+		{
+			gl::VertexAttrib *ptr = nullptr;
+			GLuint index = 0;
+		};
+
+		std::vector<::gl::VertexArray::AttribNode>  _attribList;
+		std::vector<::gl::VertexBinding*>  _bindingList;
 };
 
 }

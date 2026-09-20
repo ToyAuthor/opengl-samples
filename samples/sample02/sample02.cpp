@@ -6,9 +6,11 @@
 #include "sdl/Window.hpp"
 #include "gl/Utils.hpp"
 #include "gl/ShaderProgram.hpp"
-#include "gl/StreamingBuffer.hpp"
-#include "gl/VertexArray.hpp"
-#include "gl/Camera.hpp"
+#include "gl/Camera.hpp"           // 提供一個簡單的 FPS 攝影機，並提供 std140 UBO 的 UniformBlock 結構
+#include "gl/StreamingBuffer.hpp"  // 用來建立一個 CPU 與 GPU 之間的 Persistent Mapping buffer，讓 CPU 可以非同步地寫入資料到 GPU
+#include "gl/VertexArray.hpp"      // 用來建立 VAO，並管理 VertexAttrib 與 VertexBinding
+#include "gl/VertexBinding.hpp"
+#include "gl/VertexAttrib.hpp"
 
 namespace{
 
@@ -77,7 +79,7 @@ int main2()
 {
 	sdl::Window app;
 
-	if ( false == app.init( "sample 01", WindowWidth, WindowHeight ) )
+	if ( false == app.init( "sample 02", WindowWidth, WindowHeight ) )
 	{
 		fmt::print( "視窗建立失敗\n" );
 		return EXIT_FAILURE;
@@ -88,7 +90,22 @@ int main2()
 	//--------------------------------------------------------------------------
 
 	// 建立 VAO（改用 gl::VertexArray 包裝，RAII 自動管理生命週期）
-	gl::VertexArray VAO;
+	auto VAO = std::make_shared<gl::VertexArray>();
+
+	// 啟用 vertex 屬性 0 (位置) 與 1 (顏色)
+	auto attrib_0 = std::make_shared<gl::VertexAttrib>( VAO, 0 );  // 位置(location = 0)
+	auto attrib_1 = std::make_shared<gl::VertexAttrib>( VAO, 1 );  // 顏色(location = 1)
+
+	// 設定屬性格式
+	attrib_0->setFormat( 3, GL_FLOAT, GL_FALSE, 0 );
+	attrib_1->setFormat( 3, GL_FLOAT, GL_FALSE, 3 * sizeof( float ) );
+
+	// 從 VAO 取得綁定點
+	auto bindingPoint = std::make_shared<gl::VertexBinding>( VAO );
+
+	// 將屬性 0 和 1 都黏到綁定點
+	bindingPoint->attachAttrib( attrib_0 );
+	bindingPoint->attachAttrib( attrib_1 );
 
 	// VBO 改由 StreamingBuffer 管理，使用 Persistent Mapping + ring buffer
 	// 讓 CPU 端可以非同步地寫入頂點資料，不需等待前一幀的 GPU 讀取完成
@@ -103,18 +120,6 @@ int main2()
 		fmt::print( "StreamingBuffer 建立失敗(驅動可能不支援 ARB_buffer_storage)\n" );
 		return EXIT_FAILURE;
 	}
-
-	// 啟用頂點屬性 0 (位置) 與 1 (顏色)
-	VAO.enableAttrib( 0 );
-	VAO.enableAttrib( 1 );
-
-	// 設定屬性格式
-	VAO.setAttribFormat( 0, 3, GL_FLOAT, GL_FALSE, 0 );
-	VAO.setAttribFormat( 1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof( float ) );
-
-	// 告訴 VAO，屬性 0 和 1 都要去「第 0 號綁定點」拿資料
-	VAO.setAttribBinding( 0, 0 );
-	VAO.setAttribBinding( 1, 0 );
 
 	//--------------------------------------------------------------------------
 
@@ -170,22 +175,22 @@ int main2()
 
 		// 非同步寫入頂點資料：
 		// beginWrite() 會等待「同一個 ring 槽位」上一次使用它的 GPU 指令執行完畢，
-		// 由於 ringCount = 3，通常不會真的卡住 CPU
+		// 理想是幾乎不用等，因為 ring buffer 有多個槽位可以輪替使用
 		void* dst = vertexBuffer.beginWrite();
 
 		if ( dst != nullptr )
 		{
+			// 這邊是可以修改 vertex 資訊的，然後更新到 GPU
 			std::memcpy( dst, Vertices, sizeof( Vertices ) );
 
-			// 將 VAO 的第 0 號綁定點指向目前這個槽位的 buffer + offset
-			VAO.bindVertexBuffer(
-				0,
+			// 將 VBO 目前槽位的 buffer + offset 黏到綁定點
+			bindingPoint->bindVBO(
 				vertexBuffer.getBufferId(),
 				vertexBuffer.getCurrentOffset(),
 				static_cast<GLsizei>( VertexStride ) );
 
 			myShader.use();
-			VAO.bind();
+			VAO->bind();
 			glDrawArrays( GL_TRIANGLES, 0, 3 );
 
 			// 插入 fence 標記「這個槽位」目前這次 Draw 已提交，

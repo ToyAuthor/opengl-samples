@@ -87,7 +87,7 @@ int main2()
 		0,    // 從 VBO 的第 0 個 byte 開始讀取
 		6 * sizeof( float ) );
 
-	// 2. 啟用 vertex 屬性
+	// 2. 啟用 vertex 屬性欄位，數字自己定義，將 shader 裡的 layout(location = ?) 數字也寫一樣的即可
 	glEnableVertexArrayAttrib( VAO, VERTEX_ATTRIB_POSITION ); // 啟用 location 0，座標
 	glEnableVertexArrayAttrib( VAO, VERTEX_ATTRIB_COLOR );    // 啟用 location 1，顏色
 
