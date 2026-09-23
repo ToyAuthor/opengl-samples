@@ -31,6 +31,11 @@ class VertexBinding
 			glVertexArrayVertexBuffer( _VAO->getID(), _bindingIndex, buffer, offset, stride );
 		}
 
+		void setDivisor( GLuint divisor )
+		{
+			glVertexArrayBindingDivisor( _VAO->getID(), _bindingIndex, divisor );
+		}
+
 	private:
 
 		std::shared_ptr<VertexArray> _VAO = nullptr;

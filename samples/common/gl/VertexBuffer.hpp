@@ -2,18 +2,18 @@
 
 namespace gl{
 
-// 包裝 EBO(Element Buffer Object)
-class ElementsBuffer
+// 包裝 VBO(Vertex Buffer Object)
+class VertexBuffer
 {
 	public:
 
-		ElementsBuffer( GLsizeiptr size, const void *data )
+		VertexBuffer( GLsizeiptr size, const void *data )
 		{
 			glCreateBuffers( 1, &_id );
 			glNamedBufferStorage( _id, size, data, 0 );
 		}
 
-		~ElementsBuffer()
+		~VertexBuffer()
 		{
 			glDeleteBuffers( 1, &_id );
 		}

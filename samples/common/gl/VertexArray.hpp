@@ -1,6 +1,9 @@
 #pragma once
 
 #include <vector>
+#include <memory>
+
+#include "gl/ElementsBuffer.hpp"
 
 namespace gl{
 
@@ -107,6 +110,13 @@ class VertexArray
 			glVertexArrayElementBuffer( _id, buffer );
 		}
 
+		void bindEBO( std::shared_ptr<gl::ElementsBuffer> EBO )
+		{
+			// 確保 EBO 的生命週期會陪著 VAO 一起走
+			_EBO = EBO;
+			glVertexArrayElementBuffer( _id, _EBO->getID() );
+		}
+
 		// 綁定此 VAO 為目前使用的頂點陣列
 		void bind() const
 		{
@@ -150,6 +160,11 @@ class VertexArray
 
 		void release()
 		{
+			if ( _EBO != nullptr )
+			{
+				_EBO = nullptr;
+			}
+
 			if ( _id != 0 )
 			{
 				// 釋放 VAO 資源，曾啟用的屬性也都會自動清除
@@ -168,6 +183,8 @@ class VertexArray
 
 		std::vector<::gl::VertexArray::AttribNode>  _attribList;
 		std::vector<::gl::VertexBinding*>  _bindingList;
+
+		std::shared_ptr<gl::ElementsBuffer> _EBO = nullptr;
 };
 
 }

@@ -36,6 +36,11 @@ class VertexAttrib
 			glVertexArrayAttribFormat( _VAO->getID(), _index, size, type, normalized, relativeOffset );
 		}
 
+		void setFormat(GLint size, GLenum type, GLuint relativeOffset)
+		{
+			glVertexArrayAttribIFormat( _VAO->getID(), _index, size, type, relativeOffset );
+		}
+
 		// 還沒試過
 		void setFormat(struct Config config)
 		{

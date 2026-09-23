@@ -9,6 +9,10 @@
 #include "gl/ShaderProgram.hpp"
 #include "gl/StreamingBuffer.hpp"
 #include "gl/VertexArray.hpp"
+#include "gl/VertexBinding.hpp"
+#include "gl/VertexAttrib.hpp"
+#include "gl/VertexBuffer.hpp"
+#include "gl/ElementsBuffer.hpp"
 #include "gl/Camera.hpp"
 #include "gl/CreateImage.hpp"
 #include "gl/TextureManager.hpp"
@@ -193,40 +197,39 @@ int main2()
 
 	//--------------------------------------------------------------------------
 
-	gl::VertexArray VAO;
+	auto VAO = std::make_shared<gl::VertexArray>();
+	auto VBO = std::make_shared<gl::VertexBuffer>( sizeof( QuadVertices ), QuadVertices );
+	auto EBO = std::make_shared<gl::ElementsBuffer>( sizeof( QuadIndices ), QuadIndices );
 
-	GLuint quadVBO = 0;
-	GLuint quadEBO = 0;
+	auto bindingPointA = std::make_shared<gl::VertexBinding>( VAO );
+	auto bindingPointB = std::make_shared<gl::VertexBinding>( VAO );
 
-	glCreateBuffers( 1, &quadVBO );
-	glNamedBufferStorage( quadVBO, sizeof( QuadVertices ), QuadVertices, 0 );
+	VAO->bindEBO( EBO );
+	bindingPointA->bindVBO( VBO->getID(), 0, static_cast<GLsizei>( QuadVertexStride ) );
 
-	glCreateBuffers( 1, &quadEBO );
-	glNamedBufferStorage( quadEBO, sizeof( QuadIndices ), QuadIndices, 0 );
+	// 啟用 vertex 屬性 0 (位置) 與 1 (顏色)
+	auto attrib_0 = std::make_shared<gl::VertexAttrib>( VAO, 0 );  // 位置(location = 0)
+	auto attrib_1 = std::make_shared<gl::VertexAttrib>( VAO, 1 );  // 顏色(location = 1)
+	auto attrib_2 = std::make_shared<gl::VertexAttrib>( VAO, 2 );  // xyz = 世界座標偏移, w = 縮放
+	auto attrib_3 = std::make_shared<gl::VertexAttrib>( VAO, 3 );  // texture array 裡的第幾層
+	auto attrib_4 = std::make_shared<gl::VertexAttrib>( VAO, 4 );  // 對應 SSBO 中第幾組 texture array
 
-	VAO.bindElementBuffer( quadEBO );
-	VAO.bindVertexBuffer( 0, quadVBO, 0, static_cast<GLsizei>( QuadVertexStride ) );
+	// binding A：共用四邊形 vertex(位置 + UV)
+	// 將屬性 0 和 1 都黏到綁定點
+	attrib_0->setFormat( 2, GL_FLOAT, GL_FALSE, 0 );
+	attrib_1->setFormat( 2, GL_FLOAT, GL_FALSE, 2 * sizeof( float ) );
+	bindingPointA->attachAttrib( attrib_0 );
+	bindingPointA->attachAttrib( attrib_1 );
+//	bindingPointA->setDivisor( 0 );   // divisor = 0，表示每個 vertex 都要更新一次，預設已經是0了
 
-	// binding 0：共用四邊形 vertex(位置 + UV)
-	VAO.enableAttrib( 0 );
-	VAO.enableAttrib( 1 );
-	VAO.setAttribFormat( 0, 2, GL_FLOAT, GL_FALSE, 0 );
-	VAO.setAttribFormat( 1, 2, GL_FLOAT, GL_FALSE, 2 * sizeof( float ) );
-	VAO.setAttribBinding( 0, 0 );
-	VAO.setAttribBinding( 1, 0 );
-//	VAO.setBindingDivisor( 0, 0 );   // binding 0 的 divisor = 0，表示每個 vertex 都要更新一次，預設已經是0了
-
-	// binding 1：instanced 屬性(每個 instance 各自的偏移/縮放/layer/材質索引)
-	VAO.enableAttrib( 2 );
-	VAO.enableAttrib( 3 );
-	VAO.enableAttrib( 4 );
-	VAO.setAttribFormat( 2, 4, GL_FLOAT, GL_FALSE, offsetof( InstanceData, offset ) );
-	VAO.setAttribIFormat( 3, 1, GL_INT, offsetof( InstanceData, layerIndex ) );
-	VAO.setAttribIFormat( 4, 1, GL_INT, offsetof( InstanceData, materialIndex ) );
-	VAO.setAttribBinding( 2, 1 );
-	VAO.setAttribBinding( 3, 1 );
-	VAO.setAttribBinding( 4, 1 );
-	VAO.setBindingDivisor( 1, 1 ); // binding 1 的 divisor = 1，每個 instance 更新一次(一張圖片就是一個 instance)
+	// binding B：instanced 屬性(每個 instance 各自的偏移/縮放/layer/材質索引)
+	attrib_2->setFormat( 4, GL_FLOAT, GL_FALSE, offsetof( InstanceData, offset ) );
+	attrib_3->setFormat( 1, GL_INT, offsetof( InstanceData, layerIndex ) );
+	attrib_4->setFormat( 1, GL_INT, offsetof( InstanceData, materialIndex ) );
+	bindingPointB->attachAttrib( attrib_2 );
+	bindingPointB->attachAttrib( attrib_3 );
+	bindingPointB->attachAttrib( attrib_4 );
+	bindingPointB->setDivisor( 1 );   // divisor = 1，每個 instance 更新一次(一張圖片就是一個 instance)
 
 	//--------------------------------------------------------------------------
 
@@ -342,8 +345,7 @@ int main2()
 
 				std::memcpy( instanceDst, instances, sizeof( instances ) );
 
-				VAO.bindVertexBuffer(
-					1,
+				bindingPointB->bindVBO(
 					instanceBuffer.getBufferId(),
 					instanceBuffer.getCurrentOffset(),
 					static_cast<GLsizei>( InstanceStride ) );
@@ -371,7 +373,7 @@ int main2()
 					std::memcpy( indirectDst, commands, sizeof( commands ) );
 
 					myShader.use();
-					VAO.bind();
+					VAO->bind();
 
 					glBindBuffer( GL_DRAW_INDIRECT_BUFFER, indirectBuffer.getBufferId() );
 
@@ -393,9 +395,6 @@ int main2()
 	}
 
 	//--------------------------------------------------------------------------
-
-	glDeleteBuffers( 1, &quadVBO );
-	glDeleteBuffers( 1, &quadEBO );
 
 	myShader.release();
 
