@@ -121,8 +121,8 @@ class Camera
 			return true;
 		}
 
-		glm::vec3 getPosition() const { return _position; }
-		void      setPosition( const glm::vec3& position ) { _position = position; }
+		auto  getPosition() const -> glm::vec3 { return _position; }
+		void  setPosition( const glm::vec3& position ) { _position = position; }
 
 		float getMoveSpeed() const { return _moveSpeed; }
 		void  setMoveSpeed( float speed ) { _moveSpeed = speed; }

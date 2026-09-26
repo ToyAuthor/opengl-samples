@@ -8,6 +8,9 @@
 #include <fmt/core.h>
 #include "gl/ImageData.hpp"
 #include "gl/CreateImage.hpp"
+#include <cstring>
+#include <cstdint>
+#include "gl/StreamingBuffer.hpp"
 
 namespace gl{
 
@@ -56,53 +59,119 @@ class TextureManager
 			return *this;
 		}
 
-		// 依照 names 清單建立 texture array，每個字串各佔一個 layer
-		// width / height 可自訂該組 texture array 的尺寸，
-		// 不同的 TextureManager 實例可以各自使用不同尺寸，彼此互不影響
+		// 一般用法：內部自行以同步方式上傳（保留原有介面相容性）
 		bool build( const std::vector<std::string>& names, int width = 128, int height = 128 )
 		{
-			release();
-
-			if ( names.empty() )
+			if ( !allocate( static_cast<int>( names.size() ), width, height ) )
 			{
 				return false;
 			}
 
-			std::vector<ImageData> images( names.size() );
-
 			for ( size_t i = 0; i < names.size(); ++i )
 			{
-				images[i].width  = width;
-				images[i].height = height;
-				CreateImage( names[i], images[i] );
-			}
-
-			const int layers    = static_cast<int>( images.size() );
-			const int mipLevels = 1 + static_cast<int>( std::floor( std::log2( static_cast<float>( std::max( width, height ) ) ) ) );
-
-			// 使用 GL_TEXTURE_2D_ARRAY 把多張同尺寸圖片包成同一張紋理
-			glCreateTextures( GL_TEXTURE_2D_ARRAY, 1, &_textureId );
-
-			// 一次配置好整個 mipmap chain 所需的儲存空間（Immutable Storage）
-			glTextureStorage3D( _textureId, mipLevels, GL_RGBA8, width, height, layers );
-
-			for ( int layer = 0; layer < layers; ++layer )
-			{
-				const ImageData& img = images[layer];
-
-				if ( img.width != width || img.height != height )
-				{
-					fmt::print( "TextureManager: 圖片尺寸不一致，layer {} 略過\n", layer );
-					continue;
-				}
+				ImageData img;
+				img.width  = width;
+				img.height = height;
+				CreateImage( names[i], img );
 
 				glTextureSubImage3D(
-					_textureId,
-					0,                 // mip level 0
-					0, 0, layer,       // xoffset, yoffset, zoffset(=layer)
-					width, height, 1,  // width, height, depth(=1 layer)
+					_textureId, 0,
+					0, 0, static_cast<GLint>( i ),
+					width, height, 1,
 					GL_RGBA, GL_UNSIGNED_BYTE,
 					img.pixels.data() );
+			}
+
+			return finalize();
+		}
+
+		// -------- PBO 上傳流程：allocate() -> uploadLayer() x N -> finalize() --------
+
+		// 只建立 texture array 的 immutable storage，不上傳任何像素
+		bool allocate( int layers, int width, int height )
+		{
+			release();
+
+			if ( layers <= 0 || width <= 0 || height <= 0 )
+			{
+				return false;
+			}
+
+			_width     = width;
+			_height    = height;
+			_layerCount = layers;
+
+			const int mipLevels = 1 + static_cast<int>(
+				std::floor( std::log2( static_cast<float>( std::max( width, height ) ) ) ) );
+
+			glCreateTextures( GL_TEXTURE_2D_ARRAY, 1, &_textureId );
+			glTextureStorage3D( _textureId, mipLevels, GL_RGBA8, width, height, layers );
+
+			return _textureId != 0;
+		}
+
+		// 透過外部提供的 StreamingBuffer(PBO) 非同步上傳單一 layer
+		//
+		// 流程：
+		//   beginWrite()  取得目前槽位的 mapped 指標（內部以 fence 等待 GPU 用完該槽）
+		//   memcpy        CPU 直接寫入，不需 glBufferSubData
+		//   glBindBuffer  綁定 GL_PIXEL_UNPACK_BUFFER，pixels 參數改成槽位的 byte offset
+		//   endWrite()    插入 fence 並切換到下一個槽位，CPU 不必等待 GPU
+		bool uploadLayer( StreamingBuffer& pbo, int layer, const ImageData& img )
+		{
+			if ( _textureId == 0 || layer < 0 || layer >= _layerCount )
+			{
+				return false;
+			}
+
+			if ( img.width != _width || img.height != _height )
+			{
+				fmt::print( "TextureManager: 圖片尺寸不一致，layer {} 略過\n", layer );
+				return false;
+			}
+
+			const size_t bytes = static_cast<size_t>( _width ) * _height * 4; // RGBA8
+
+			if ( pbo.getTarget() != GL_PIXEL_UNPACK_BUFFER || pbo.getSlotSize() < bytes )
+			{
+				fmt::print( "TextureManager: PBO 槽位不足或 target 不正確\n" );
+				return false;
+			}
+
+			void* dst = pbo.beginWrite();
+
+			if ( dst == nullptr )
+			{
+				return false;
+			}
+
+			std::memcpy( dst, img.pixels.data(), bytes );
+
+			glBindBuffer( GL_PIXEL_UNPACK_BUFFER, pbo.getBufferId() );
+
+			glTextureSubImage3D(
+				_textureId,
+				0,                       // mip level 0
+				0, 0, layer,             // xoffset, yoffset, zoffset(=layer)
+				_width, _height, 1,      // width, height, depth(=1 layer)
+				GL_RGBA, GL_UNSIGNED_BYTE,
+				reinterpret_cast<const void*>(
+					static_cast<uintptr_t>( pbo.getCurrentOffset() ) ) );
+
+			glBindBuffer( GL_PIXEL_UNPACK_BUFFER, 0 );
+
+			// fence 必須在 draw/transfer 指令送出後才插入，才能正確保護該槽位
+			pbo.endWrite();
+
+			return true;
+		}
+
+		// 產生 mipmap、設定取樣參數、取得 bindless handle 並設為常駐
+		bool finalize()
+		{
+			if ( _textureId == 0 )
+			{
+				return false;
 			}
 
 			glGenerateTextureMipmap( _textureId );
@@ -112,8 +181,6 @@ class TextureManager
 			glTextureParameteri( _textureId, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
 			glTextureParameteri( _textureId, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
 
-			// 取得 Bindless Texture Handle 並設為常駐（resident），
-			// 之後 shader 端只要拿到 handle 即可取樣，不需要 glBindTexture
 			_handle = glGetTextureHandleARB( _textureId );
 
 			if ( _handle == 0 )
@@ -123,8 +190,6 @@ class TextureManager
 			}
 
 			glMakeTextureHandleResidentARB( _handle );
-
-			_layerCount = layers;
 
 			return true;
 		}
@@ -156,6 +221,8 @@ class TextureManager
 			}
 
 			_layerCount = 0;
+			_width      = 0;
+			_height     = 0;
 		}
 
 		void moveFrom( TextureManager&& rhs ) noexcept
@@ -170,8 +237,10 @@ class TextureManager
 		}
 
 		GLuint   _textureId  = 0;   // 紀錄 texture array 的 ID
-		GLuint64 _handle     = 0;   // 紀錄 Bindless Texture Handle，也是種 ID，讓 shader 端可以直接選擇要使用什麼 texture
+		GLuint64 _handle     = 0;   // 紀錄 Bindless Texture Handle
 		int      _layerCount = 0;
+		int      _width      = 0;
+		int      _height     = 0;
 };
 
 }

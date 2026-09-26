@@ -5,7 +5,11 @@
 
 namespace gl{
 
-// 按照 name 這個字串的內容以及 img 所記錄的圖片尺寸來產生一張圖片
+/*
+ * CreateImage 按照 name 這個字串的內容以及 img 所記錄的圖片尺寸來產生一張圖片
+ * 靠軟體建立一張圖片可以讓範例內容更簡潔
+ * 不用真的準備圖片檔
+ */
 inline void CreateImage( const std::string& name, ::gl::ImageData& img )
 {
 	// 若外部未指定尺寸，使用預設值
@@ -22,8 +26,8 @@ inline void CreateImage( const std::string& name, ::gl::ImageData& img )
 		seed *= 16777619u;
 	}
 
-	unsigned char r = static_cast<unsigned char>( ( seed >> 0 ) & 255 );
-	unsigned char g = static_cast<unsigned char>( ( seed >> 8 ) & 255 );
+	unsigned char r = static_cast<unsigned char>( ( seed >> 0  ) & 255 );
+	unsigned char g = static_cast<unsigned char>( ( seed >> 8  ) & 255 );
 	unsigned char b = static_cast<unsigned char>( ( seed >> 16 ) & 255 );
 
 	for ( int y = 0; y < img.height; ++y )

@@ -20,6 +20,7 @@ class StreamingBuffer
 		// GL_TRANSFORM_FEEDBACK_BUFFER 也就是 Transform Feedback
 		// GL_ARRAY_BUFFER
 		// GL_DRAW_INDIRECT_BUFFER
+		// GL_PIXEL_UNPACK_BUFFER PBO(Pixel Unpack Buffer)用來非同步上傳 texture 資料
 		// slotSize 為單一槽位所需大小，內部會依 target 的對齊需求向上取整
 		StreamingBuffer(GLenum target, size_t slotSize, int ringCount = 3);
 		~StreamingBuffer();

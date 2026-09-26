@@ -18,7 +18,7 @@ class VertexBinding
 
 		~VertexBinding()
 		{
-
+			//glVertexArrayVertexBuffer( _VAO->getID(), _bindingIndex, 0, 0, 0 );
 		}
 
 		void attachAttrib( std::shared_ptr<gl::VertexAttrib> ptr )

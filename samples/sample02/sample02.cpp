@@ -1,4 +1,15 @@
-#include <cstring>
+/*
+ * 範例名稱：sample02
+ * -----------------------------------------------------------------------------
+ * 用非同步方式將 vertex 資料、矩陣傳送至顯卡
+ * 非同步是避免畫面卡頓的關鍵，讓 CPU 與 GPU 不用互相等待
+ * 在 gl::StreamingBuffer 當中已經很好的實作了這個功能
+ *
+ * 使用 FPS 遊戲方式操作視角
+ * 採用 UBO 來傳送 Camera 的 View / Projection 矩陣
+ */
+
+#include <string>
 #include <fmt/core.h>
 #include <glad/glad.h>
 #include <SDL.h>
@@ -51,7 +62,7 @@ const char* FragmentShaderSource = R"(
 
 // 三角形數據
 constexpr float Vertices[] = {
-	// 位置              // 顏色
+	 // 位置             // 顏色
 	 0.0f,  0.5f, 0.0f,  1.0f, 0.0f, 0.0f,    // 頂部 (紅)
 	 0.5f, -0.5f, 0.0f,  0.0f, 1.0f, 0.0f,    // 右下 (綠)
 	-0.5f, -0.5f, 0.0f,  0.0f, 0.0f, 1.0f     // 左下 (藍)
@@ -101,11 +112,11 @@ int main2()
 	attrib_1->setFormat( 3, GL_FLOAT, GL_FALSE, 3 * sizeof( float ) );
 
 	// 從 VAO 取得綁定點
-	auto bindingPoint = std::make_shared<gl::VertexBinding>( VAO );
+	auto bindingIndex = std::make_shared<gl::VertexBinding>( VAO );
 
 	// 將屬性 0 和 1 都黏到綁定點
-	bindingPoint->attachAttrib( attrib_0 );
-	bindingPoint->attachAttrib( attrib_1 );
+	bindingIndex->attachAttrib( attrib_0 );
+	bindingIndex->attachAttrib( attrib_1 );
 
 	// VBO 改由 StreamingBuffer 管理，使用 Persistent Mapping + ring buffer
 	// 讓 CPU 端可以非同步地寫入頂點資料，不需等待前一幀的 GPU 讀取完成
@@ -184,7 +195,7 @@ int main2()
 			std::memcpy( dst, Vertices, sizeof( Vertices ) );
 
 			// 將 VBO 目前槽位的 buffer + offset 黏到綁定點
-			bindingPoint->bindVBO(
+			bindingIndex->bindVBO(
 				vertexBuffer.getBufferId(),
 				vertexBuffer.getCurrentOffset(),
 				static_cast<GLsizei>( VertexStride ) );
@@ -222,7 +233,7 @@ int main()
 	}
 	catch ( const std::exception& e )
 	{
-		fmt::print( "異常訊息: {}\n", e.what() );
+		fmt::print( "異常訊息：{}\n", e.what() );
 	}
 	catch ( ... )
 	{

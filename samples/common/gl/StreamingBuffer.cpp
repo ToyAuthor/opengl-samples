@@ -1,7 +1,5 @@
 #include <utility>   // 為了使用 std::move 而引入的
 #include <fmt/core.h>
-#include "gl/ImageData.hpp"
-#include "gl/CreateImage.hpp"
 #include "gl/StreamingBuffer.hpp"
 
 namespace {
@@ -40,6 +38,13 @@ size_t QueryAlignment( GLenum target )
 			// Indirect Draw Command Buffer(給 glMultiDrawElementsIndirect 用)
 			// 規格並未提供可查詢的 offset alignment 常數，
 			// 只要求 offset 必須是 4 的倍數(GLuint 大小)
+			align = static_cast< GLint >( sizeof( GLuint ) );
+			break;
+
+		case GL_PIXEL_UNPACK_BUFFER:
+			// PBO(Pixel Unpack Buffer)：用來非同步上傳 texture 資料
+			// 規格未強制要求特定 offset alignment，
+			// 但實務上建議以 4 bytes 對齊，避免部分驅動在解讀 pixel row 時效率不佳
 			align = static_cast< GLint >( sizeof( GLuint ) );
 			break;
 

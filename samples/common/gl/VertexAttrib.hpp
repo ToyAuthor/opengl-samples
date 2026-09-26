@@ -29,6 +29,7 @@ class VertexAttrib
 
 		~VertexAttrib()
 		{
+			//glDisableVertexArrayAttrib( _VAO->getID(), _index );
 		}
 
 		void setFormat(GLint size, GLenum type, GLboolean normalized, GLuint relativeOffset)

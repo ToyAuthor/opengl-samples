@@ -1,5 +1,16 @@
+/*
+ * 範例名稱：sample03
+ * -----------------------------------------------------------------------------
+ * 用非同步方式將 vertex 資料、矩陣、texture(PBO)傳送至顯卡
+ * 非同步是避免畫面卡頓的關鍵，讓 CPU 與 GPU 不用互相等待
+ * 在 gl::StreamingBuffer 當中已經很好的實作了這個功能
+ *
+ * 使用 FPS 遊戲方式操作視角
+ * 採用 UBO 來傳送 Camera 的 View / Projection 矩陣
+ */
+
 #include <cstring>
-#include <cstdint>
+#include <string>
 #include <fmt/core.h>
 #include <glad/glad.h>
 #include <SDL.h>
@@ -7,39 +18,25 @@
 #include "sdl/Window.hpp"
 #include "gl/Utils.hpp"
 #include "gl/ShaderProgram.hpp"
-#include "gl/StreamingBuffer.hpp"
-#include "gl/VertexArray.hpp"
+#include "gl/Camera.hpp"           // 提供一個簡單的 FPS 攝影機，並提供 std140 UBO 的 UniformBlock 結構
+#include "gl/StreamingBuffer.hpp"  // 用來建立一個 CPU 與 GPU 之間的 Persistent Mapping buffer，讓 CPU 可以非同步地寫入資料到 GPU
+#include "gl/VertexArray.hpp"      // 用來建立 VAO，並管理 VertexAttrib 與 VertexBinding
 #include "gl/VertexBinding.hpp"
 #include "gl/VertexAttrib.hpp"
 #include "gl/VertexBuffer.hpp"
-#include "gl/ElementsBuffer.hpp"
-#include "gl/Camera.hpp"
+#include "gl/ImageData.hpp"
 #include "gl/CreateImage.hpp"
-#include "gl/TextureManager.hpp"
 
 namespace{
 
-/*
- * aOffsetScale / aLayerIndex / aMaterialIndex 為 instanced 屬性
- * 各自代表每個四邊形的世界座標偏移、縮放、
- * 要取樣的 texture array layer，
- * 以及要使用哪一組 texture array(對應 SSBO 中的 handle 索引)
- */
+// vertex 著色器：多加一個 std140 UBO，接收 Camera 傳來的 View / Projection 矩陣
 const char* VertexShaderSource = R"(
 	#version 460 core
-	#extension GL_ARB_bindless_texture : require  // 允許在 shader 中使用 bindless texture
 
-	layout (location = 0) in vec2 aPos;
-	layout (location = 1) in vec2 aUV;
-	layout (location = 2) in vec4 aOffsetScale;   // xyz = 世界座標偏移, w = 縮放
-	layout (location = 3) in int  aLayerIndex;
-	layout (location = 4) in int  aMaterialIndex; // 對應 SSBO 中第幾組 texture array
+	layout (location = 0) in vec3 aPos;
+	layout (location = 1) in vec3 aColor;
+	layout (location = 0) out vec3 ourColor;
 
-	layout (location = 0) out vec2 vUV;
-	layout (location = 1) flat out int vLayer;
-	layout (location = 2) flat out int vMaterial;
-
-	// 使用 Camera 傳來的 View / Projection 矩陣（std140 UBO）
 	layout (std140, binding = 0) uniform CameraBlock
 	{
 		mat4 view;
@@ -49,89 +46,89 @@ const char* VertexShaderSource = R"(
 
 	void main()
 	{
-		vec3 worldPos = vec3( aPos * aOffsetScale.w, 0.0 ) + aOffsetScale.xyz;
-		gl_Position = camera.viewProjection * vec4( worldPos, 1.0 );
-
-		vUV       = aUV;
-		vLayer    = aLayerIndex;
-		vMaterial = aMaterialIndex;
+		gl_Position = camera.viewProjection * vec4( aPos, 1.0 );
+		ourColor = aColor;
 	}
 )";
 
-/*
- * bindless handle 陣列改存在 SSBO 中(std430)
- * ARB_bindless_texture 允許把 sampler 型別直接放進 buffer block
- * 因為 sampler 底層本質上就是 64-bit 的 handle
- * 這是用來管理大量材質 handle 的做法
- * 不需要每個材質各自佔一個 uniform location
- */
 const char* FragmentShaderSource = R"(
 	#version 460 core
-	#extension GL_ARB_bindless_texture : require
 
-	layout (location = 0) in  vec2 vUV;
-	layout (location = 1) flat in int vLayer;
-	layout (location = 2) flat in int vMaterial;
+	layout (location = 0) in  vec3 ourColor;
 	layout (location = 0) out vec4 FragColor;
-
-	layout (std430, binding = 1) readonly buffer TextureBlock
-	{
-		sampler2DArray texArrays[];
-	};
+	layout (location = 0) uniform float timeOffset;
 
 	void main()
 	{
-		FragColor = texture( texArrays[ vMaterial ], vec3( vUV, float( vLayer ) ) );
+		FragColor = vec4( ourColor.r, ourColor.g * sin(timeOffset), ourColor.b, 1.0f );
 	}
 )";
 
-// 一個共用的單位四邊形(-0.5 ~ 0.5)，位置 + UV(texture座標)
-constexpr float QuadVertices[] = {
-	// 位置         // UV
-	-0.5f,  0.5f,   0.0f, 1.0f,
-	 0.5f,  0.5f,   1.0f, 1.0f,
-	 0.5f, -0.5f,   1.0f, 0.0f,
-	-0.5f, -0.5f,   0.0f, 0.0f,
+// 貼圖四邊形使用的 shader：純粹把 texture 內容畫出來，
+// 用來驗證 PBO 非同步上傳的結果是否正確
+const char* TexVertexShaderSource = R"(
+	#version 460 core
+
+	layout (location = 0) in vec3 aPos;
+	layout (location = 1) in vec2 aUV;
+	layout (location = 0) out vec2 vUV;
+
+	layout (std140, binding = 0) uniform CameraBlock
+	{
+		mat4 view;
+		mat4 projection;
+		mat4 viewProjection;
+	} camera;
+
+	void main()
+	{
+		gl_Position = camera.viewProjection * vec4( aPos, 1.0 );
+		vUV = aUV;
+	}
+)";
+
+const char* TexFragmentShaderSource = R"(
+	#version 460 core
+
+	layout (location = 0) in  vec2 vUV;
+	layout (location = 0) out vec4 FragColor;
+	layout (binding = 0) uniform sampler2D myTexture;
+
+	void main()
+	{
+		FragColor = texture( myTexture, vUV );
+	}
+)";
+
+// 三角形數據
+constexpr float Vertices[] = {
+	 // 位置             // 顏色
+	 0.0f,  0.5f, 0.0f,  1.0f, 0.0f, 0.0f,    // 頂部 (紅)
+	 0.5f, -0.5f, 0.0f,  0.0f, 1.0f, 0.0f,    // 右下 (綠)
+	-0.5f, -0.5f, 0.0f,  0.0f, 0.0f, 1.0f     // 左下 (藍)
 };
 
-constexpr GLuint QuadIndices[] = { 0, 1, 2, 2, 3, 0 };
+constexpr size_t VertexStride = 6 * sizeof( float );
 
-constexpr size_t QuadVertexStride = 4 * sizeof( float );
+// 貼圖用的四邊形，位置放在三角形右側，避免重疊
+constexpr float TexQuadVertices[] = {
+	// 位置               // UV
+	 0.8f,  0.6f, 0.0f,   0.0f, 1.0f,
+	 1.6f,  0.6f, 0.0f,   1.0f, 1.0f,
+	 1.6f, -0.2f, 0.0f,   1.0f, 0.0f,
 
-// 每個 instance(四邊形)各自的資料：
-// 世界座標偏移 + 縮放 + texture layer + 要使用哪一組 texture array
-struct InstanceData
-{
-	glm::vec3 offset;
-	float     scale;
-	int       layerIndex;
-	int       materialIndex; // 0 = TextureManager A, 1 = TextureManager B
+	 0.8f,  0.6f, 0.0f,   0.0f, 1.0f,
+	 1.6f, -0.2f, 0.0f,   1.0f, 0.0f,
+	 0.8f, -0.2f, 0.0f,   0.0f, 0.0f,
 };
 
-constexpr size_t InstanceStride = sizeof( InstanceData );
-
-// 對應 glMultiDrawElementsIndirect 時所需的 command 結構
-struct DrawElementsIndirectCommand
-{
-	GLuint count;
-	GLuint instanceCount;
-	GLuint firstIndex;
-	GLint  baseVertex;
-	GLuint baseInstance;
-};
-
-// SSBO 中儲存的 texture handle 陣列結構(需與 shader 中的 TextureBlock 對應)
-struct TextureHandleBlock
-{
-	GLuint64 texArrays[2]; // 2 組 texture array 的 bindless handle
-};
+constexpr size_t TexQuadVertexStride = 5 * sizeof( float );
 
 constexpr int WindowWidth  = 800;
 constexpr int WindowHeight = 600;
 
-constexpr int ImageCountA    = 4; // Texture Array A：128x128，4 張
-constexpr int ImageCountB    = 3; // Texture Array B：256x256，3 張
-constexpr int TotalImageCount = ImageCountA + ImageCountB;
+constexpr int TextureWidth  = 128;
+constexpr int TextureHeight = 128;
 
 // 依照 Camera::Movement 對應鍵盤按鍵，統一在此處理輸入
 void HandleKeyboardInput( gl::Camera& camera, float deltaTime )
@@ -146,6 +143,26 @@ void HandleKeyboardInput( gl::Camera& camera, float deltaTime )
 	if ( state[ SDL_SCANCODE_Q ] ) camera.processKeyboard( gl::Camera::Movement::Down,     deltaTime );
 }
 
+// 依照 tick 產生一張「會捲動」的棋盤格圖片，
+// 用來證明每一幀透過 PBO 上傳的貼圖內容確實有在更新
+void FillScrollingCheckerImage( gl::ImageData& img, int scrollOffset )
+{
+	for ( int y = 0; y < img.height; ++y )
+	{
+		for ( int x = 0; x < img.width; ++x )
+		{
+			const int  sx      = ( x + scrollOffset ) % img.width;
+			const bool checker = ( ( sx / 16 ) + ( y / 16 ) ) % 2 == 0;
+			const int  i       = ( y * img.width + x ) * img.channels;
+
+			img.pixels[i + 0] = checker ? 255 : 40;
+			img.pixels[i + 1] = checker ? 200 : 40;
+			img.pixels[i + 2] = checker ? 60  : 200;
+			img.pixels[i + 3] = 255;
+		}
+	}
+}
+
 int main2()
 {
 	sdl::Window app;
@@ -156,115 +173,111 @@ int main2()
 		return EXIT_FAILURE;
 	}
 
-	//--------------------------------------------------------------------------
-
 	gl::ShaderProgram   myShader( VertexShaderSource, FragmentShaderSource );
+	gl::ShaderProgram   texShader( TexVertexShaderSource, TexFragmentShaderSource );
 
 	//--------------------------------------------------------------------------
 
-	// Texture Array A：128x128，4 張圖片
-	gl::TextureManager  textureManagerA;
-
-	if ( !textureManagerA.build( { "brick", "grass", "sand", "water" }, 128, 128 ) )
-	{
-		fmt::print( "TextureManager A 建立失敗\n" );
-		return EXIT_FAILURE;
-	}
-
-	// Texture Array B：256x256，3 張圖片(尺寸與圖片數量都與 A 不同)
-	gl::TextureManager  textureManagerB;
-
-	if ( !textureManagerB.build( { "lava", "stone", "wood" }, 256, 256 ) )
-	{
-		fmt::print( "TextureManager B 建立失敗\n" );
-		return EXIT_FAILURE;
-	}
-
-	//--------------------------------------------------------------------------
-
-	// 使用 StreamingBuffer 來管理 SSBO，儲存兩組 bindless texture handle
-	// binding point = 1，每幀可更新(雖然這個例子中不需要)
-	gl::StreamingBuffer textureHandleSSBO(
-		GL_SHADER_STORAGE_BUFFER,
-		sizeof( TextureHandleBlock ),
-		3 );
-
-	if ( !textureHandleSSBO.isValid() )
-	{
-		fmt::print( "Texture Handle SSBO 建立失敗(驅動可能不支援 ARB_buffer_storage)\n" );
-		return EXIT_FAILURE;
-	}
-
-	//--------------------------------------------------------------------------
-
+	// 建立 VAO（改用 gl::VertexArray 包裝，RAII 自動管理生命週期）
 	auto VAO = std::make_shared<gl::VertexArray>();
-	auto VBO = std::make_shared<gl::VertexBuffer>( sizeof( QuadVertices ), QuadVertices );
-	auto EBO = std::make_shared<gl::ElementsBuffer>( sizeof( QuadIndices ), QuadIndices );
-
-	auto bindingPointA = std::make_shared<gl::VertexBinding>( VAO );
-	auto bindingPointB = std::make_shared<gl::VertexBinding>( VAO );
-
-	VAO->bindEBO( EBO );
-	bindingPointA->bindVBO( VBO->getID(), 0, static_cast<GLsizei>( QuadVertexStride ) );
 
 	// 啟用 vertex 屬性 0 (位置) 與 1 (顏色)
 	auto attrib_0 = std::make_shared<gl::VertexAttrib>( VAO, 0 );  // 位置(location = 0)
 	auto attrib_1 = std::make_shared<gl::VertexAttrib>( VAO, 1 );  // 顏色(location = 1)
-	auto attrib_2 = std::make_shared<gl::VertexAttrib>( VAO, 2 );  // xyz = 世界座標偏移, w = 縮放
-	auto attrib_3 = std::make_shared<gl::VertexAttrib>( VAO, 3 );  // texture array 裡的第幾層
-	auto attrib_4 = std::make_shared<gl::VertexAttrib>( VAO, 4 );  // 對應 SSBO 中第幾組 texture array
 
-	// binding A：共用四邊形 vertex(位置 + UV)
+	// 設定屬性格式
+	attrib_0->setFormat( 3, GL_FLOAT, GL_FALSE, 0 );
+	attrib_1->setFormat( 3, GL_FLOAT, GL_FALSE, 3 * sizeof( float ) );
+
+	// 從 VAO 取得綁定點
+	auto bindingIndex = std::make_shared<gl::VertexBinding>( VAO );
+
 	// 將屬性 0 和 1 都黏到綁定點
-	attrib_0->setFormat( 2, GL_FLOAT, GL_FALSE, 0 );
-	attrib_1->setFormat( 2, GL_FLOAT, GL_FALSE, 2 * sizeof( float ) );
-	bindingPointA->attachAttrib( attrib_0 );
-	bindingPointA->attachAttrib( attrib_1 );
-//	bindingPointA->setDivisor( 0 );   // divisor = 0，表示每個 vertex 都要更新一次，預設已經是0了
+	bindingIndex->attachAttrib( attrib_0 );
+	bindingIndex->attachAttrib( attrib_1 );
 
-	// binding B：instanced 屬性(每個 instance 各自的偏移/縮放/layer/材質索引)
-	attrib_2->setFormat( 4, GL_FLOAT, GL_FALSE, offsetof( InstanceData, offset ) );
-	attrib_3->setFormat( 1, GL_INT, offsetof( InstanceData, layerIndex ) );
-	attrib_4->setFormat( 1, GL_INT, offsetof( InstanceData, materialIndex ) );
-	bindingPointB->attachAttrib( attrib_2 );
-	bindingPointB->attachAttrib( attrib_3 );
-	bindingPointB->attachAttrib( attrib_4 );
-	bindingPointB->setDivisor( 1 );   // divisor = 1，每個 instance 更新一次(一張圖片就是一個 instance)
+	// VBO 改由 StreamingBuffer 管理，使用 Persistent Mapping + ring buffer
+	// 讓 CPU 端可以非同步地寫入頂點資料，不需等待前一幀的 GPU 讀取完成
+	gl::StreamingBuffer vertexBuffer( GL_ARRAY_BUFFER, sizeof( Vertices ), 3 );
 
-	//--------------------------------------------------------------------------
-
+	// Camera 的 View / Projection 矩陣也用同樣手法建立 UBO，
+	// 每幀非同步上傳，不需等待 GPU 完成上一幀的 draw call 才能寫入
 	gl::StreamingBuffer cameraBuffer( GL_UNIFORM_BUFFER, sizeof( gl::Camera::UniformBlock ), 3 );
-	gl::StreamingBuffer instanceBuffer( GL_ARRAY_BUFFER, sizeof( InstanceData ) * TotalImageCount, 3 );
-	gl::StreamingBuffer indirectBuffer( GL_DRAW_INDIRECT_BUFFER, sizeof( DrawElementsIndirectCommand ) * TotalImageCount, 3 );
 
-	if ( !cameraBuffer.isValid() || !instanceBuffer.isValid() || !indirectBuffer.isValid() )
+	if ( !vertexBuffer.isValid() || !cameraBuffer.isValid() )
 	{
-		fmt::print( "StreamingBuffer 建立失敗（驅動可能不支援 ARB_buffer_storage）\n" );
+		fmt::print( "StreamingBuffer 建立失敗(驅動可能不支援 ARB_buffer_storage)\n" );
 		return EXIT_FAILURE;
 	}
 
 	//--------------------------------------------------------------------------
+	// 貼圖四邊形所需的 VAO / VBO（vertex 資料量不大且不需每幀變動，直接用靜態 VBO 即可）
 
-	// 建立攝影機，往 +Z 退開才能看到排列在 Z = 0 平面上的圖片
-	gl::Camera camera( glm::vec3( 0.0f, 0.0f, 4.0f ) );
+	auto texVAO = std::make_shared<gl::VertexArray>();
+	auto texVBO = std::make_shared<gl::VertexBuffer>( sizeof( TexQuadVertices ), TexQuadVertices );
 
-	// 上排 4 張對應 Texture Array A，下排 3 張對應 Texture Array B
-	constexpr glm::vec3 QuadOffsets[TotalImageCount] = {
-		// Texture Array A（128x128, 4 張）
-		{ -1.35f,  0.6f, 0.0f },
-		{ -0.45f,  0.6f, 0.0f },
-		{  0.45f,  0.6f, 0.0f },
-		{  1.35f,  0.6f, 0.0f },
-		// Texture Array B（256x256, 3 張）
-		{ -0.9f, -0.6f, 0.0f },
-		{  0.0f, -0.6f, 0.0f },
-		{  0.9f, -0.6f, 0.0f },
-	};
+	auto texAttrib_0 = std::make_shared<gl::VertexAttrib>( texVAO, 0 );  // 位置
+	auto texAttrib_1 = std::make_shared<gl::VertexAttrib>( texVAO, 1 );  // UV
 
-	constexpr float QuadScale = 0.8f;
-	bool            quit     = false;
-	SDL_Event       event;
-	float           lastTick = sdl::GetTick();
+	texAttrib_0->setFormat( 3, GL_FLOAT, GL_FALSE, 0 );
+	texAttrib_1->setFormat( 2, GL_FLOAT, GL_FALSE, 3 * sizeof( float ) );
+
+	auto texBindingIndex = std::make_shared<gl::VertexBinding>( texVAO );
+	texBindingIndex->attachAttrib( texAttrib_0 );
+	texBindingIndex->attachAttrib( texAttrib_1 );
+	texBindingIndex->bindVBO( texVBO->getID(), 0, static_cast<GLsizei>( TexQuadVertexStride ) );
+
+	//--------------------------------------------------------------------------
+	// 建立 texture 本體（Immutable Storage），初始內容用 gl::CreateImage 產生
+
+	gl::ImageData initialImage;
+	initialImage.width  = TextureWidth;
+	initialImage.height = TextureHeight;
+	gl::CreateImage( "sample03", initialImage );
+
+	GLuint textureId = 0;
+	glCreateTextures( GL_TEXTURE_2D, 1, &textureId );
+	glTextureStorage2D( textureId, 1, GL_RGBA8, TextureWidth, TextureHeight );
+	glTextureSubImage2D(
+		textureId, 0, 0, 0,
+		TextureWidth, TextureHeight,
+		GL_RGBA, GL_UNSIGNED_BYTE,
+		initialImage.pixels.data() );
+
+	glTextureParameteri( textureId, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+	glTextureParameteri( textureId, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+	glTextureParameteri( textureId, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+	glTextureParameteri( textureId, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+
+	// PBO(Pixel Unpack Buffer)：跟 vertexBuffer / cameraBuffer 一樣，
+	// 借用 gl::StreamingBuffer 的 Persistent Mapping + ring buffer 機制，
+	// 讓 CPU 每幀寫入圖片資料時不需要等待 GPU 完成前一次的 texture 上傳
+	gl::StreamingBuffer texturePBO(
+		GL_PIXEL_UNPACK_BUFFER,
+		static_cast<size_t>( TextureWidth ) * TextureHeight * gl::ImageData::channels,
+		3 );
+
+	if ( !texturePBO.isValid() )
+	{
+		fmt::print( "Texture PBO 建立失敗(驅動可能不支援 ARB_buffer_storage)\n" );
+		return EXIT_FAILURE;
+	}
+
+	// CPU 端用來產生每幀圖片內容的暫存資料
+	gl::ImageData scrollingImage;
+	scrollingImage.width  = TextureWidth;
+	scrollingImage.height = TextureHeight;
+	scrollingImage.pixels.resize( static_cast<size_t>( TextureWidth ) * TextureHeight * gl::ImageData::channels );
+
+	//--------------------------------------------------------------------------
+
+	// 建立攝影機，初始位置往 +Z 退開，才看得到三角形（三角形位於 Z = 0）
+	gl::Camera camera( glm::vec3( 0.0f, 0.0f, 3.0f ) );
+
+	bool       quit         = false;
+	SDL_Event  event;
+	float      lastTick     = sdl::GetTick();
+	int        scrollOffset = 0;
 
 	/*
 	 * 這迴圈的工作就兩件事：
@@ -299,96 +312,75 @@ int main2()
 
 		gl::ClearScreen();
 
+		// 更新參數：glProgramUniform 不需要先 glUseProgram
+		const float timeValue = sdl::GetTick();
+
+		// 將 timeValue 傳送進 fragmentShaderSource 內的 timeOffset
+		glProgramUniform1f( myShader.getID(), 0, timeValue );
+
 		// 非同步上傳 Camera 矩陣至 UBO，並綁定到 binding = 0
 		const float aspectRatio = static_cast<float>( WindowWidth ) / static_cast<float>( WindowHeight );
 		camera.uploadToUBO( cameraBuffer, aspectRatio, 0 );
 
-		// 非同步寫入 texture handle 至 SSBO，並綁定到 binding = 1
-		void* textureHandleDst = textureHandleSSBO.beginWrite();
+		// 非同步寫入頂點資料：
+		// beginWrite() 會等待「同一個 ring 槽位」上一次使用它的 GPU 指令執行完畢，
+		// 理想是幾乎不用等，因為 ring buffer 有多個槽位可以輪替使用
+		void* dst = vertexBuffer.beginWrite();
 
-		if ( textureHandleDst != nullptr )
+		if ( dst != nullptr )
 		{
-			TextureHandleBlock handles;
-			handles.texArrays[0] = textureManagerA.getHandle();
-			handles.texArrays[1] = textureManagerB.getHandle();
+			// 這邊是可以修改 vertex 資訊的，然後更新到 GPU
+			std::memcpy( dst, Vertices, sizeof( Vertices ) );
 
-			std::memcpy( textureHandleDst, &handles, sizeof( handles ) );
+			// 將 VBO 目前槽位的 buffer + offset 黏到綁定點
+			bindingIndex->bindVBO(
+				vertexBuffer.getBufferId(),
+				vertexBuffer.getCurrentOffset(),
+				static_cast<GLsizei>( VertexStride ) );
 
-			textureHandleSSBO.bindRange( 1 );
-			textureHandleSSBO.endWrite();
+			myShader.use();
+			VAO->bind();
+			glDrawArrays( GL_TRIANGLES, 0, 3 );
 
-			// 非同步寫入所有 instance 的資料(位置 / 縮放 / layer index / 材質索引)
-			void* instanceDst = instanceBuffer.beginWrite();
+			// 插入 fence 標記「這個槽位」目前這次 Draw 已提交，
+			// 並切換到下一個槽位供下一幀使用
+			vertexBuffer.endWrite();
+		}
 
-			if ( instanceDst != nullptr )
-			{
-				InstanceData instances[TotalImageCount];
-				int          idx = 0;
+		//----------------------------------------------------------------------
+		// PBO 非同步上傳 texture 示範：
+		// 1. CPU 端在 mapped 記憶體上產生本幀的圖片資料(捲動棋盤格)
+		// 2. 綁定 PBO 至 GL_PIXEL_UNPACK_BUFFER
+		// 3. glTextureSubImage2D 的最後一個參數改傳「offset」而非 CPU 指標，
+		//    驅動會知道資料已經在 GPU 可存取的 buffer 裡，直接 DMA 過去，
+		//    不需要 CPU 端阻塞等待資料傳輸完成
+		void* pboDst = texturePBO.beginWrite();
 
-				// Texture Array A：materialIndex = 0
-				for ( int i = 0; i < ImageCountA; ++i, ++idx )
-				{
-					instances[idx].offset        = QuadOffsets[idx];
-					instances[idx].scale         = QuadScale;
-					instances[idx].layerIndex    = i;
-					instances[idx].materialIndex = 0;
-				}
+		if ( pboDst != nullptr )
+		{
+			scrollOffset = ( scrollOffset + 1 ) % TextureWidth;
 
-				// Texture Array B：materialIndex = 1
-				for ( int i = 0; i < ImageCountB; ++i, ++idx )
-				{
-					instances[idx].offset        = QuadOffsets[idx];
-					instances[idx].scale         = QuadScale;
-					instances[idx].layerIndex    = i;
-					instances[idx].materialIndex = 1;
-				}
+			FillScrollingCheckerImage( scrollingImage, scrollOffset );
+			std::memcpy( pboDst, scrollingImage.pixels.data(), scrollingImage.pixels.size() );
 
-				std::memcpy( instanceDst, instances, sizeof( instances ) );
+			glBindBuffer( GL_PIXEL_UNPACK_BUFFER, texturePBO.getBufferId() );
 
-				bindingPointB->bindVBO(
-					instanceBuffer.getBufferId(),
-					instanceBuffer.getCurrentOffset(),
-					static_cast<GLsizei>( InstanceStride ) );
+			glTextureSubImage2D(
+				textureId, 0, 0, 0,
+				TextureWidth, TextureHeight,
+				GL_RGBA, GL_UNSIGNED_BYTE,
+				reinterpret_cast<const void*>( texturePBO.getCurrentOffset() ) );
 
-				instanceBuffer.endWrite();
+			glBindBuffer( GL_PIXEL_UNPACK_BUFFER, 0 );
 
-				// 非同步寫入 Indirect Draw Command：
-				// 每張圖片各自一筆 command，instanceCount = 1，
-				// baseInstance = i 讓 instanced 屬性剛好對應到第 i 筆 InstanceData
-				void* indirectDst = indirectBuffer.beginWrite();
+			// 插入 fence 並切換到下一個槽位，讓下一幀可以非同步寫入而不互相衝突
+			texturePBO.endWrite();
 
-				if ( indirectDst != nullptr )
-				{
-					DrawElementsIndirectCommand commands[TotalImageCount];
+			glBindTextureUnit( 0, textureId );
 
-					for ( GLuint i = 0; i < TotalImageCount; ++i )
-					{
-						commands[i].count         = static_cast<GLuint>( std::size( QuadIndices ) );
-						commands[i].instanceCount = 1;
-						commands[i].firstIndex    = 0;
-						commands[i].baseVertex    = 0;
-						commands[i].baseInstance  = i;
-					}
-
-					std::memcpy( indirectDst, commands, sizeof( commands ) );
-
-					myShader.use();
-					VAO->bind();
-
-					glBindBuffer( GL_DRAW_INDIRECT_BUFFER, indirectBuffer.getBufferId() );
-
-					// 一次呼叫，透過 indirect buffer 描述的多筆 command
-					// 分別繪製各張圖片(各自對應不同的 texture array 及 layer)
-					glMultiDrawElementsIndirect(
-						GL_TRIANGLES,
-						GL_UNSIGNED_INT,
-						reinterpret_cast<const void*>( indirectBuffer.getCurrentOffset() ),
-						TotalImageCount,
-						sizeof( DrawElementsIndirectCommand ) );
-
-					indirectBuffer.endWrite();
-				}
-			}
+			texShader.use();
+			texVAO->bind();
+			glDrawArrays( GL_TRIANGLES, 0, 6 );
 		}
 
 		app.refresh();
@@ -396,7 +388,10 @@ int main2()
 
 	//--------------------------------------------------------------------------
 
+	glDeleteTextures( 1, &textureId );
+
 	myShader.release();
+	texShader.release();
 
 	return EXIT_SUCCESS;
 }
@@ -415,7 +410,7 @@ int main()
 	}
 	catch ( const std::exception& e )
 	{
-		fmt::print( "異常訊息: {}\n", e.what() );
+		fmt::print( "異常訊息：{}\n", e.what() );
 	}
 	catch ( ... )
 	{

@@ -82,19 +82,21 @@ class VertexArray
 			glVertexArrayAttribIFormat( _id, index, size, type, relativeOffset );
 		}
 
-		// 將指定屬性索引連結到指定的 binding point
-		void setAttribBinding( GLuint index, GLuint bindingIndex )
+		// 將指定屬性索引連結到指定的 binding index
+		void setAttribBinding( GLuint attribIndex, GLuint bindingIndex )
 		{
-			glVertexArrayAttribBinding( _id, index, bindingIndex );
+			// 這個綁定在不需要的時候，沒有必要拆除
+			// 有進行 glDisableVertexArrayAttrib 就夠了
+			glVertexArrayAttribBinding( _id, attribIndex, bindingIndex );
 		}
 
-		// 設定每個 binding point 之間的實例更新頻率(instancing 用，預設為 0 表示逐頂點)
+		// 設定每個 binding index 之間的實例更新頻率(instancing 用，預設為 0 表示逐頂點)
 		void setBindingDivisor( GLuint bindingIndex, GLuint divisor )
 		{
 			glVertexArrayBindingDivisor( _id, bindingIndex, divisor );
 		}
 
-		// 將指定的頂點緩衝區綁定到指定的 binding point
+		// 將指定的頂點緩衝區綁定到指定的 binding index
 		// buffer：來源 VBO 的 id
 		// offset：緩衝區內的起始偏移量(bytes)
 		// stride：每個頂點所佔的 bytes 數
@@ -102,6 +104,8 @@ class VertexArray
 		{
 			// 直接把 VBO 釘到 VAO 的第 bindingIndex 個綁定槽
 			glVertexArrayVertexBuffer( _id, bindingIndex, buffer, offset, stride );
+
+			//glVertexArrayVertexBuffer( _id, bindingIndex, 0, 0, 0 ); // 拔掉 VBO
 		}
 
 		// 綁定 Element Buffer(EBO)

@@ -1,9 +1,20 @@
-#include <string>
-#include <fmt/core.h>    // 提供 fmt::print 來取代 std::printf
-#include <glad/glad.h>   // 用來跟顯卡驅動程式溝通，並取出顯卡所支援的 OpenGL API 給你使用
-#include <SDL.h>         // 負責建立視窗、處理來自作業系統的 event
+/*
+ * 範例名稱：sample01
+ * -----------------------------------------------------------------------------
+ * 作為本專案的第一個範例，註解會寫最多最詳細(包括CMakeLists.txt)
+ * 本範例寫過的註解，在其它範例裡就不會再解釋一遍了
+ *
+ * 這裡示範了如何建立一個基礎的 OpenGL 程式
+ * 畫了一個三角形，並且透過 uniform 變數讓顏色隨著時間變化
+ */
 
-//----------------------寫在 "opengl-samples/samples/common"----------------------
+#include <string>
+#include <fmt/core.h>             // 提供 fmt::print 來取代標準庫的 std::printf
+#include <glad/glad.h>            // 用來跟顯卡驅動程式溝通，並取出顯卡所支援的 OpenGL API 給你使用
+#include <SDL.h>                  // 負責建立視窗、處理來自作業系統的 event
+
+// 以下四個標頭檔放在 "opengl-samples/samples/common" 目錄下
+// -----------------------------------------------------------------------------
 #include "sdl/Utils.hpp"          // 提供一些基於 SDL2 的通用工具
 #include "sdl/Window.hpp"         // 將 SDL2 的視窗工作、OpenGL 初始行為給包裝起來
 #include "gl/Utils.hpp"           // 提供一些基於 OpenGL 的通用工具
@@ -17,7 +28,7 @@ const char* VertexShaderSource = R"(
 	#version 460 core
 
 	// VBO 透過 glNamedBufferStorage 將 Vertices 的數據資料傳進來
-	// location 數字就是 glEnableVertexArrayAttrib 設定的屬性編號
+	// location 數字就是 glEnableVertexArrayAttrib 所設定的屬性編號
 	layout (location = 0) in vec3 aPos;
 	layout (location = 1) in vec3 aColor;
 	layout (location = 0) out vec3 ourColor;  // out ourColor 所用的 location 數字必須跟 FragmentShaderSource 的 in ourColor 相符
@@ -30,7 +41,7 @@ const char* VertexShaderSource = R"(
 	}
 )";
 
-// fragment著色器，用來計算畫面上的畫素該是什麼顏色
+// fragment 著色器，用來計算畫面上的畫素該是什麼顏色
 const char* FragmentShaderSource = R"(
 	#version 460 core
 
@@ -46,7 +57,7 @@ const char* FragmentShaderSource = R"(
 
 // 三角形數據，描述三個點的位置與顏色
 constexpr float Vertices[] = {
-	// 座標              // 顏色
+	 // 座標             // 顏色
 	 0.0f,  0.5f, 0.0f,  1.0f, 0.0f, 0.0f,    // 頂部 (紅)
 	 0.5f, -0.5f, 0.0f,  0.0f, 1.0f, 0.0f,    // 右下 (綠)
 	-0.5f, -0.5f, 0.0f,  0.0f, 0.0f, 1.0f     // 左下 (藍)
@@ -62,42 +73,52 @@ int main2()
 		return EXIT_FAILURE;
 	}
 
+	// 將著色器程式碼編譯成 GPU 可用的著色器(shader)
 	gl::ShaderProgram   myShader( VertexShaderSource, FragmentShaderSource );
 
 	//--------------------------------------------------------------------------
 
-	constexpr GLuint BINDING_POINT          = 0;   // VAO 的綁定點編號，這個數字不會被 shader 使用到，shader 只會使用 location 編號
+	constexpr GLuint BINDING_INDEX          = 0;   // VAO 的綁定點編號，這個數字不會被 shader 使用到，shader 只會使用 location 編號
 	constexpr GLuint VERTEX_ATTRIB_POSITION = 0;   // shader 裡的 layout(location = 0) 對應到這個數字
 	constexpr GLuint VERTEX_ATTRIB_COLOR    = 1;   // shader 裡的 layout(location = 1) 對應到這個數字
 
-	GLuint   VAO = 0;   // 用來申請 Vertex Array Object，裡面會記錄 VBO 的綁定點、屬性格式、屬性綁定點等資訊
+	GLuint   VAO = 0;   // 用來申請 Vertex Array Object，像個設定檔一樣，OpenGL 會按照裡面的設定規劃來處理數據
 	GLuint   VBO = 0;   // 用來申請 Vertex Buffer Object，裡面會存放 vertex 數據資料
 
 	glCreateVertexArrays( 1, &VAO );
 	glCreateBuffers( 1, &VBO );
 
-	// 配置緩衝區空間並儲存數據，固定式存儲(Immutable Storage)，效能更好
-	// 最後一個參數設為 0，表示這個緩衝區的內容不會被修改
+	/*
+	 * 配置緩衝區空間並儲存數據，固定式存儲(Immutable Storage)，效能更好
+	 * 最後一個參數設為 0，表示這個緩衝區的內容不會被修改
+	 * 很適合不會變形、破碎的 mesh
+	 *
+	 * 如果希望頻繁修改數據的話
+	 * 依然是使用 glNamedBufferStorage，可參考 gl/StreamingBuffer.cpp 內的實作
+	 *
+	 * 但是如果連空間大小都會改變的話，那就必須選擇使用 glNamedBufferData
+	 * 考慮到記憶體破碎的問題，絕大部分情況都還是選擇使用 glNamedBufferStorage
+	 */
 	glNamedBufferStorage( VBO, sizeof( Vertices ), Vertices, 0 );
 
 	// 1. 將 VBO 綁定到 VAO 的「第 0 號綁定點」，並規定 6 個 float 為一組 vertex 資料
 	glVertexArrayVertexBuffer( VAO,
-		BINDING_POINT,
+		BINDING_INDEX,
 		VBO,
 		0,    // 從 VBO 的第 0 個 byte 開始讀取
 		6 * sizeof( float ) );
 
-	// 2. 啟用 vertex 屬性欄位，數字自己定義，將 shader 裡的 layout(location = ?) 數字也寫一樣的即可
+	// 2. 啟用 vertex 屬性欄位，將 shader 裡的 layout(location = ?) 數字也寫一樣的即可
 	glEnableVertexArrayAttrib( VAO, VERTEX_ATTRIB_POSITION ); // 啟用 location 0，座標
 	glEnableVertexArrayAttrib( VAO, VERTEX_ATTRIB_COLOR );    // 啟用 location 1，顏色
 
 	// 3. 設定屬性格式
 	glVertexArrayAttribFormat( VAO, VERTEX_ATTRIB_POSITION, 3, GL_FLOAT, GL_FALSE, 0 ); // 偏移 0
-	glVertexArrayAttribFormat( VAO, VERTEX_ATTRIB_COLOR, 3, GL_FLOAT, GL_FALSE, 3 * sizeof( float ) ); // 偏移 3 個 float
+	glVertexArrayAttribFormat( VAO, VERTEX_ATTRIB_COLOR,    3, GL_FLOAT, GL_FALSE, 3 * sizeof( float ) ); // 偏移 3 個 float
 
 	// 4. 告訴 VAO，屬性 0 和 1 都要去「第 0 號綁定點」拿資料
-	glVertexArrayAttribBinding( VAO, VERTEX_ATTRIB_POSITION, BINDING_POINT );  // 屬性 0
-	glVertexArrayAttribBinding( VAO, VERTEX_ATTRIB_COLOR,    BINDING_POINT );  // 屬性 1
+	glVertexArrayAttribBinding( VAO, VERTEX_ATTRIB_POSITION, BINDING_INDEX );  // 屬性 0
+	glVertexArrayAttribBinding( VAO, VERTEX_ATTRIB_COLOR,    BINDING_INDEX );  // 屬性 1
 
 	//--------------------------------------------------------------------------
 
@@ -122,14 +143,14 @@ int main2()
 
 		const float timeValue = sdl::GetTick();
 
-		// 將 timeValue 輸入進 FragmentShaderSource 內的 timeOffset
+		// 將 timeValue 輸入進 Program 內的 timeOffset(vertex跟fragment都能收到)
 		glProgramUniform1f(
 			myShader.getID(),
 			0,   // 數字 0 對應著 uniform 變數的 location，跟 VERTEX_ATTRIB_POSITION 的數字無關
 			timeValue );
 
 		myShader.use();                       // 趕在開始描繪之前綁定 shader
-		glBindVertexArray( VAO );             // 趕在開始描繪之前綁定 VAO
+		glBindVertexArray( VAO );             // 趕在開始描繪之前綁定 VAO，這樣 OpenGL 才知道要怎麼去解讀 VBO 的數據資料
 		glDrawArrays( GL_TRIANGLES, 0, 3 );   // 以 GL_TRIANGLES 的規則來進行描繪，會使用之前已經設定好的數據資料
 
 		/*
@@ -162,7 +183,7 @@ int main()
 	}
 	catch ( const std::exception& e )
 	{
-		fmt::print( "異常訊息: {}\n", e.what() );
+		fmt::print( "異常訊息：{}\n", e.what() );
 	}
 	catch ( ... )
 	{
