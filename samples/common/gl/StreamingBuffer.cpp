@@ -64,11 +64,7 @@ size_t AlignUp( size_t value, size_t align )
 
 gl::StreamingBuffer::StreamingBuffer( GLenum target, size_t slotSize, int ringCount )
 	: _target( target )
-	, _bufferId( 0 )
-	, _mappedPtr( nullptr )
-	, _slotSize( 0 )
 	, _ringCount( ringCount > 0 ? ringCount : 1 )
-	, _index( 0 )
 {
 	_slotSize = AlignUp( slotSize, QueryAlignment( target ) );
 

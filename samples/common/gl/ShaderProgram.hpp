@@ -19,9 +19,12 @@ class ShaderProgram
 			glAttachShader( _id, vsID );
 			glAttachShader( _id, fsID );
 
+			/*
+			 * 到這步就完成 shader program 了
+			 * 之後可以馬上刪光 shader object 了，避免資源洩漏
+			 */
 			glLinkProgram( _id );  // 到這步就完成 shader program 了
 
-			// 這裡可以馬上卸載並刪除 shader object 了，避免資源洩漏
 			glDetachShader( _id, vsID );
 			glDetachShader( _id, fsID );
 			glDeleteShader( vsID );
@@ -32,7 +35,7 @@ class ShaderProgram
 			// 檢查 Program 連結狀態
 			glGetProgramiv( _id, GL_LINK_STATUS, &linkSuccess );
 
-			if ( GL_FALSE==linkSuccess )
+			if ( GL_FALSE == linkSuccess )
 			{
 				char infoLog[512];
 				glGetProgramInfoLog( _id, 512, nullptr, infoLog );

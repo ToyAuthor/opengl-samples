@@ -9,6 +9,7 @@ set(INC_DIR
 set(SOURCE
 	sample03.cpp
 	${opengl_samples_SOURCE_DIR}/samples/common/gl/StreamingBuffer.cpp
+	${opengl_samples_SOURCE_DIR}/samples/common/gl/VertexArrayBindingIndex.cpp
 	${opengl_samples_SOURCE_DIR}/extlibs/src/glad/glad.c
 )
 

@@ -62,13 +62,13 @@ class StreamingBuffer
 		void release();
 		void moveFrom( StreamingBuffer&& rhs) noexcept;
 
-		GLenum               _target;
-		GLuint               _bufferId;
-		void*                _mappedPtr;   // 記住跟 OpenGL 申請的記憶體空間，CPU 可以直接寫入
-		size_t               _slotSize;
-		int                  _ringCount;
-		int                  _index;
-		std::vector<GLsync>  _fences;      // 是個指標清單，一個指標對應一個槽位，指標為 nullptr 表示該槽位可用
+		GLenum    _target;              // 由建構子依參數賦值，這裡不用寫
+		GLuint    _bufferId = 0;
+		void*     _mappedPtr = nullptr; // 記住跟 OpenGL 申請的記憶體空間，CPU 可以直接寫入
+		size_t    _slotSize = 0;
+		int       _ringCount;           // 由建構子依參數賦值，這裡不用寫
+		int       _index = 0;
+		std::vector<GLsync> _fences;    // 是個指標清單，一個指標對應一個槽位，指標為 nullptr 表示該槽位可用
 };
 
 }

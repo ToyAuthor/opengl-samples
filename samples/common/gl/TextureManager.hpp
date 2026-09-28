@@ -60,7 +60,7 @@ class TextureManager
 		}
 
 		// 一般用法：內部自行以同步方式上傳（保留原有介面相容性）
-		bool build( const std::vector<std::string>& names, int width = 128, int height = 128 )
+		/*bool build( const std::vector<std::string>& names, int width = 128, int height = 128 )
 		{
 			if ( !allocate( static_cast<int>( names.size() ), width, height ) )
 			{
@@ -83,7 +83,7 @@ class TextureManager
 			}
 
 			return finalize();
-		}
+		}*/
 
 		// -------- PBO 上傳流程：allocate() -> uploadLayer() x N -> finalize() --------
 

@@ -2,13 +2,11 @@
 
 #include <vector>
 #include <memory>
-
+#include "gl/Core.hpp"
+#include "gl/VertexArrayBindingIndex.hpp"
 #include "gl/ElementsBuffer.hpp"
 
 namespace gl{
-
-class VertexAttrib;
-class VertexBinding;
 
 // 包裝 VAO(Vertex Array Object)的 DSA 操作
 // 使用 RAII 管理生命週期，禁止複製、允許移動
@@ -17,9 +15,34 @@ class VertexArray
 {
 	public:
 
-		VertexArray()
+		/*
+		 * 這邊直接寫死 binding index 數量，我認為這種名字固定的寫法更適合
+		 * index 數字幾乎就像個名字一樣，那個數字沒意義
+		 */
+		VertexArrayBindingIndex bindingIndex0;
+		VertexArrayBindingIndex bindingIndex1;
+		VertexArrayBindingIndex bindingIndex2;
+		VertexArrayBindingIndex bindingIndex3;
+		VertexArrayBindingIndex bindingIndex4;
+		VertexArrayBindingIndex bindingIndex5;
+
+		VertexArray( std::shared_ptr<::gl::Core> core ) :
+			_core( core ),
+			bindingIndex0( 0 ),
+			bindingIndex1( 1 ),
+			bindingIndex2( 2 ),
+			bindingIndex3( 3 ),
+			bindingIndex4( 4 ),
+			bindingIndex5( 5 )
 		{
 			glCreateVertexArrays( 1, &_id );
+
+			// 賦值之後就不能更改了
+			bindingIndex0._VAO = _id;
+			bindingIndex1._VAO = _id;
+			bindingIndex2._VAO = _id;
+			bindingIndex3._VAO = _id;
+			bindingIndex4._VAO = _id;
 		}
 
 		~VertexArray()
@@ -32,10 +55,26 @@ class VertexArray
 		VertexArray& operator=( const VertexArray& ) = delete;
 
 		// 允許移動
-		VertexArray( VertexArray&& rhs ) noexcept
-			: _id( rhs._id )
+		VertexArray( VertexArray&& rhs ) noexcept:
+			_core( rhs._core ),
+			_id( rhs._id ),
+			bindingIndex0( 0 ),
+			bindingIndex1( 1 ),
+			bindingIndex2( 2 ),
+			bindingIndex3( 3 ),
+			bindingIndex4( 4 ),
+			bindingIndex5( 5 )
 		{
 			rhs._id = 0;
+			rhs._core = nullptr;
+
+			// 賦值之後就不能更改了
+			bindingIndex0 = rhs.bindingIndex0;
+			bindingIndex1 = rhs.bindingIndex1;
+			bindingIndex2 = rhs.bindingIndex2;
+			bindingIndex3 = rhs.bindingIndex3;
+			bindingIndex4 = rhs.bindingIndex4;
+			bindingIndex5 = rhs.bindingIndex5;
 		}
 
 		VertexArray& operator=( VertexArray&& rhs ) noexcept
@@ -43,75 +82,21 @@ class VertexArray
 			if ( this != &rhs )
 			{
 				release();
+				_core   = rhs._core;
 				_id     = rhs._id;
 				rhs._id = 0;
+				rhs._core = nullptr;
+
+				// 賦值之後就不能更改了
+				bindingIndex0 = rhs.bindingIndex0;
+				bindingIndex1 = rhs.bindingIndex1;
+				bindingIndex2 = rhs.bindingIndex2;
+				bindingIndex3 = rhs.bindingIndex3;
+				bindingIndex4 = rhs.bindingIndex4;
+				bindingIndex5 = rhs.bindingIndex5;
 			}
 
 			return *this;
-		}
-
-		// 啟用指定索引的頂點屬性
-		// 就是 shader 裡的 location
-		void enableAttrib( GLuint index )
-		{
-			glEnableVertexArrayAttrib( _id, index );
-		}
-
-		/*
-		 * 停用指定索引的頂點屬性
-		 * 這功能幾乎用不到，沒什麼必要去停用某個屬性
-		 * 沒用到就擺著也不會怎樣
-		 */
-		void disableAttrib( GLuint index )
-		{
-			glDisableVertexArrayAttrib( _id, index );
-		}
-
-		// 設定屬性的資料格式(浮點數版本)
-		void setAttribFormat(
-			GLuint index, GLint size, GLenum type,
-			GLboolean normalized, GLuint relativeOffset )
-		{
-			glVertexArrayAttribFormat( _id, index, size, type, normalized, relativeOffset );
-		}
-
-		// 設定屬性的資料格式(整數版本，例如 GL_INT / GL_UNSIGNED_BYTE 不需要正規化時使用)
-		void setAttribIFormat(
-			GLuint index, GLint size, GLenum type, GLuint relativeOffset )
-		{
-			glVertexArrayAttribIFormat( _id, index, size, type, relativeOffset );
-		}
-
-		// 將指定屬性索引連結到指定的 binding index
-		void setAttribBinding( GLuint attribIndex, GLuint bindingIndex )
-		{
-			// 這個綁定在不需要的時候，沒有必要拆除
-			// 有進行 glDisableVertexArrayAttrib 就夠了
-			glVertexArrayAttribBinding( _id, attribIndex, bindingIndex );
-		}
-
-		// 設定每個 binding index 之間的實例更新頻率(instancing 用，預設為 0 表示逐頂點)
-		void setBindingDivisor( GLuint bindingIndex, GLuint divisor )
-		{
-			glVertexArrayBindingDivisor( _id, bindingIndex, divisor );
-		}
-
-		// 將指定的頂點緩衝區綁定到指定的 binding index
-		// buffer：來源 VBO 的 id
-		// offset：緩衝區內的起始偏移量(bytes)
-		// stride：每個頂點所佔的 bytes 數
-		void bindVertexBuffer( GLuint bindingIndex, GLuint buffer, GLintptr offset, GLsizei stride )
-		{
-			// 直接把 VBO 釘到 VAO 的第 bindingIndex 個綁定槽
-			glVertexArrayVertexBuffer( _id, bindingIndex, buffer, offset, stride );
-
-			//glVertexArrayVertexBuffer( _id, bindingIndex, 0, 0, 0 ); // 拔掉 VBO
-		}
-
-		// 綁定 Element Buffer(EBO)
-		void bindElementBuffer( GLuint buffer )
-		{
-			glVertexArrayElementBuffer( _id, buffer );
 		}
 
 		void bindEBO( std::shared_ptr<gl::ElementsBuffer> EBO )
@@ -124,43 +109,29 @@ class VertexArray
 		// 綁定此 VAO 為目前使用的頂點陣列
 		void bind() const
 		{
-			glBindVertexArray( _id );
+			_core->_bindVAO( _id );
 		}
 
-		// 解除綁定(切換回預設的 0 號 VAO)
-		void unbind() const
-		{
-			glBindVertexArray( 0 );
-		}
+		/*
+		 * 解除綁定(切換回預設的 0 號 VAO)
+		 * 不過這功能實在沒必要
+		 * 因為 OpenGL 規定描繪時就是一定要綁一個 VAO
+		 * 即使不需要 VAO 進行設定也必須綁
+		 * 這個 unbind 沒有使用的場合
+		 */
+		//void unbind() const
+		//{
+		//	glBindVertexArray( 0 );
+		//}
 
 		bool isValid() const
 		{
 			return _id != 0;
 		}
 
-		GLuint getID() const
-		{
-			return _id;
-		}
-
-		void addAttrib( GLuint index, gl::VertexAttrib *ptr )
-		{
-			struct AttribNode   node;
-
-			node.ptr = ptr;
-			node.index = index;
-
-			_attribList.push_back(node);
-		}
-
-		GLuint addBinding(::gl::VertexBinding *ptr)
-		{
-			_bindingList.push_back(ptr);
-
-			return static_cast<GLuint>( _bindingList.size() - 1 );
-		}
-
 	private:
+
+		std::shared_ptr<::gl::Core> _core;
 
 		void release()
 		{
@@ -186,9 +157,41 @@ class VertexArray
 		};
 
 		std::vector<::gl::VertexArray::AttribNode>  _attribList;
-		std::vector<::gl::VertexBinding*>  _bindingList;
-
 		std::shared_ptr<gl::ElementsBuffer> _EBO = nullptr;
+
+	public:
+
+		GLuint _getID() const
+		{
+			return _id;
+		}
+
+		// 給 gl::VertexAttrib 使用的，用來記住有什麼屬性來申請過
+		void _addAttrib( GLuint index, gl::VertexAttrib* ptr )
+		{
+			// 檢查是否已有相同的 index
+			for ( const auto& node : _attribList )
+			{
+				// 發現已經被佔用的 index
+				if ( node.index == index )
+				{
+					/*
+					 * 這個 index 已經被使用過了，不能再使用
+					 * 由於本專案注重的是示範程式碼的可讀性
+					 * 並不講究架構
+					 * 所以這裡就直接拋 exception 了
+					 */
+					throw std::runtime_error( "gl::VertexArray::addAttrib() - A VertexAttrib with the same index already exists. Please check your code." );
+				}
+			}
+
+			struct AttribNode   node;
+
+			node.ptr = ptr;
+			node.index = index;
+
+			_attribList.push_back( node );
+		}
 };
 
 }

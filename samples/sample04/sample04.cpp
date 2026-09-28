@@ -20,11 +20,10 @@
 #include <SDL.h>
 #include "sdl/Utils.hpp"
 #include "sdl/Window.hpp"
-#include "gl/Utils.hpp"
+#include "gl/Core.hpp"
 #include "gl/ShaderProgram.hpp"
 #include "gl/StreamingBuffer.hpp"
 #include "gl/VertexArray.hpp"
-#include "gl/VertexBinding.hpp"
 #include "gl/VertexAttrib.hpp"
 #include "gl/VertexBuffer.hpp"
 #include "gl/ElementsBuffer.hpp"
@@ -190,18 +189,8 @@ bool BuildTextureArrayWithPBO(
 	return manager.finalize();
 }
 
-int main2()
+int main3( sdl::Window& app, std::shared_ptr<gl::Core> core )
 {
-	sdl::Window app;
-
-	if ( false == app.init( "sample 04", WindowWidth, WindowHeight ) )
-	{
-		fmt::print( "視窗建立失敗\n" );
-		return EXIT_FAILURE;
-	}
-
-	//--------------------------------------------------------------------------
-
 	gl::ShaderProgram   myShader( VertexShaderSource, FragmentShaderSource );
 
 	//--------------------------------------------------------------------------
@@ -255,15 +244,12 @@ int main2()
 
 	//--------------------------------------------------------------------------
 
-	auto VAO = std::make_shared<gl::VertexArray>();
+	auto VAO = std::make_shared<gl::VertexArray>( core );
 	auto VBO = std::make_shared<gl::VertexBuffer>( sizeof( QuadVertices ), QuadVertices );
 	auto EBO = std::make_shared<gl::ElementsBuffer>( sizeof( QuadIndices ), QuadIndices );
 
-	auto bindingIndexA = std::make_shared<gl::VertexBinding>( VAO );
-	auto bindingIndexB = std::make_shared<gl::VertexBinding>( VAO );
-
 	VAO->bindEBO( EBO );
-	bindingIndexA->bindVBO( VBO->getID(), 0, static_cast<GLsizei>( QuadVertexStride ) );
+	VAO->bindingIndex0.bindVBO( VBO->getID(), 0, static_cast<GLsizei>( QuadVertexStride ) );
 
 	// 啟用 vertex 屬性 0 (位置) 與 1 (顏色)
 	auto attrib_0 = std::make_shared<gl::VertexAttrib>( VAO, 0 );  // 位置(location = 0)
@@ -276,23 +262,23 @@ int main2()
 	// 將屬性 0 和 1 都黏到綁定點
 	attrib_0->setFormat( 2, GL_FLOAT, GL_FALSE, 0 );
 	attrib_1->setFormat( 2, GL_FLOAT, GL_FALSE, 2 * sizeof( float ) );
-	bindingIndexA->attachAttrib( attrib_0 );
-	bindingIndexA->attachAttrib( attrib_1 );
-//	bindingIndexA->setDivisor( 0 );   // divisor = 0，表示每個 vertex 都要更新一次，預設已經是0了
+	VAO->bindingIndex0.bind( attrib_0 );
+	VAO->bindingIndex0.bind( attrib_1 );
+//	VAO->bindingIndex0.setDivisor( 0 );   // divisor = 0，表示每個 vertex 都要更新一次，預設已經是0了
 
 	// binding B：instanced 屬性(每個 instance 各自的偏移/縮放/layer/材質索引)
 	attrib_2->setFormat( 4, GL_FLOAT, GL_FALSE, offsetof( InstanceData, offset ) );
 	attrib_3->setFormat( 1, GL_INT, offsetof( InstanceData, layerIndex ) );
 	attrib_4->setFormat( 1, GL_INT, offsetof( InstanceData, materialIndex ) );
-	bindingIndexB->attachAttrib( attrib_2 );
-	bindingIndexB->attachAttrib( attrib_3 );
-	bindingIndexB->attachAttrib( attrib_4 );
+	VAO->bindingIndex1.bind( attrib_2 );
+	VAO->bindingIndex1.bind( attrib_3 );
+	VAO->bindingIndex1.bind( attrib_4 );
 	/*
-	 * divisor = 0，每個頂點更新一次（非 instanced 屬性）
+	 * divisor = 0，每個頂點更新一次(非 instanced 屬性)
 	 * divisor = 1，每個 instance 更新一次(一張圖片就是一個 instance)
 	 * divisor = 2，每兩個 instance 更新一次
 	 */
-	bindingIndexB->setDivisor( 1 );
+	VAO->bindingIndex1.setDivisor( 1 );
 
 	//--------------------------------------------------------------------------
 
@@ -360,7 +346,7 @@ int main2()
 
 		HandleKeyboardInput( camera, deltaTime );
 
-		gl::ClearScreen();
+		core->clear();
 
 		// 非同步上傳 Camera 矩陣至 UBO，並綁定到 binding = 0
 		const float aspectRatio = static_cast<float>( WindowWidth ) / static_cast<float>( WindowHeight );
@@ -408,7 +394,7 @@ int main2()
 
 				std::memcpy( instanceDst, instances, sizeof( instances ) );
 
-				bindingIndexB->bindVBO(
+				VAO->bindingIndex1.bindVBO(
 					instanceBuffer.getBufferId(),
 					instanceBuffer.getCurrentOffset(),
 					static_cast<GLsizei>( InstanceStride ) );
@@ -462,6 +448,21 @@ int main2()
 	myShader.release();
 
 	return EXIT_SUCCESS;
+}
+
+int main2()
+{
+	sdl::Window app;
+
+	if ( false == app.init( "sample 04", WindowWidth, WindowHeight ) )
+	{
+		fmt::print( "視窗建立失敗\n" );
+		return EXIT_FAILURE;
+	}
+
+	auto core = std::make_shared<gl::Core>();
+
+	return main3( app, core );
 }
 
 }

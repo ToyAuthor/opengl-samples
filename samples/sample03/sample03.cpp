@@ -16,12 +16,11 @@
 #include <SDL.h>
 #include "sdl/Utils.hpp"
 #include "sdl/Window.hpp"
-#include "gl/Utils.hpp"
+#include "gl/Core.hpp"
 #include "gl/ShaderProgram.hpp"
 #include "gl/Camera.hpp"           // 提供一個簡單的 FPS 攝影機，並提供 std140 UBO 的 UniformBlock 結構
 #include "gl/StreamingBuffer.hpp"  // 用來建立一個 CPU 與 GPU 之間的 Persistent Mapping buffer，讓 CPU 可以非同步地寫入資料到 GPU
 #include "gl/VertexArray.hpp"      // 用來建立 VAO，並管理 VertexAttrib 與 VertexBinding
-#include "gl/VertexBinding.hpp"
 #include "gl/VertexAttrib.hpp"
 #include "gl/VertexBuffer.hpp"
 #include "gl/ImageData.hpp"
@@ -163,23 +162,15 @@ void FillScrollingCheckerImage( gl::ImageData& img, int scrollOffset )
 	}
 }
 
-int main2()
+int main3( sdl::Window &app, std::shared_ptr<gl::Core> core )
 {
-	sdl::Window app;
-
-	if ( false == app.init( "sample 03", WindowWidth, WindowHeight ) )
-	{
-		fmt::print( "視窗建立失敗\n" );
-		return EXIT_FAILURE;
-	}
-
 	gl::ShaderProgram   myShader( VertexShaderSource, FragmentShaderSource );
 	gl::ShaderProgram   texShader( TexVertexShaderSource, TexFragmentShaderSource );
 
 	//--------------------------------------------------------------------------
 
 	// 建立 VAO（改用 gl::VertexArray 包裝，RAII 自動管理生命週期）
-	auto VAO = std::make_shared<gl::VertexArray>();
+	auto VAO = std::make_shared<gl::VertexArray>( core );
 
 	// 啟用 vertex 屬性 0 (位置) 與 1 (顏色)
 	auto attrib_0 = std::make_shared<gl::VertexAttrib>( VAO, 0 );  // 位置(location = 0)
@@ -189,12 +180,9 @@ int main2()
 	attrib_0->setFormat( 3, GL_FLOAT, GL_FALSE, 0 );
 	attrib_1->setFormat( 3, GL_FLOAT, GL_FALSE, 3 * sizeof( float ) );
 
-	// 從 VAO 取得綁定點
-	auto bindingIndex = std::make_shared<gl::VertexBinding>( VAO );
-
 	// 將屬性 0 和 1 都黏到綁定點
-	bindingIndex->attachAttrib( attrib_0 );
-	bindingIndex->attachAttrib( attrib_1 );
+	VAO->bindingIndex0.bind( attrib_0 );
+	VAO->bindingIndex0.bind( attrib_1 );
 
 	// VBO 改由 StreamingBuffer 管理，使用 Persistent Mapping + ring buffer
 	// 讓 CPU 端可以非同步地寫入頂點資料，不需等待前一幀的 GPU 讀取完成
@@ -213,7 +201,7 @@ int main2()
 	//--------------------------------------------------------------------------
 	// 貼圖四邊形所需的 VAO / VBO（vertex 資料量不大且不需每幀變動，直接用靜態 VBO 即可）
 
-	auto texVAO = std::make_shared<gl::VertexArray>();
+	auto texVAO = std::make_shared<gl::VertexArray>( core );
 	auto texVBO = std::make_shared<gl::VertexBuffer>( sizeof( TexQuadVertices ), TexQuadVertices );
 
 	auto texAttrib_0 = std::make_shared<gl::VertexAttrib>( texVAO, 0 );  // 位置
@@ -222,10 +210,9 @@ int main2()
 	texAttrib_0->setFormat( 3, GL_FLOAT, GL_FALSE, 0 );
 	texAttrib_1->setFormat( 2, GL_FLOAT, GL_FALSE, 3 * sizeof( float ) );
 
-	auto texBindingIndex = std::make_shared<gl::VertexBinding>( texVAO );
-	texBindingIndex->attachAttrib( texAttrib_0 );
-	texBindingIndex->attachAttrib( texAttrib_1 );
-	texBindingIndex->bindVBO( texVBO->getID(), 0, static_cast<GLsizei>( TexQuadVertexStride ) );
+	texVAO->bindingIndex0.bind( texAttrib_0 );
+	texVAO->bindingIndex0.bind( texAttrib_1 );
+	texVAO->bindingIndex0.bindVBO( texVBO->getID(), 0, static_cast<GLsizei>( TexQuadVertexStride ) );
 
 	//--------------------------------------------------------------------------
 	// 建立 texture 本體（Immutable Storage），初始內容用 gl::CreateImage 產生
@@ -310,7 +297,7 @@ int main2()
 
 		HandleKeyboardInput( camera, deltaTime );
 
-		gl::ClearScreen();
+		core->clear();
 
 		// 更新參數：glProgramUniform 不需要先 glUseProgram
 		const float timeValue = sdl::GetTick();
@@ -333,7 +320,7 @@ int main2()
 			std::memcpy( dst, Vertices, sizeof( Vertices ) );
 
 			// 將 VBO 目前槽位的 buffer + offset 黏到綁定點
-			bindingIndex->bindVBO(
+			VAO->bindingIndex0.bindVBO(
 				vertexBuffer.getBufferId(),
 				vertexBuffer.getCurrentOffset(),
 				static_cast<GLsizei>( VertexStride ) );
@@ -394,6 +381,21 @@ int main2()
 	texShader.release();
 
 	return EXIT_SUCCESS;
+}
+
+int main2()
+{
+	sdl::Window app;
+
+	if ( false == app.init( "sample 03", WindowWidth, WindowHeight ) )
+	{
+		fmt::print( "視窗建立失敗\n" );
+		return EXIT_FAILURE;
+	}
+
+	auto core = std::make_shared<gl::Core>();
+
+	return main3( app, core );
 }
 
 }
