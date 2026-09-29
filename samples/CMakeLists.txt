@@ -22,3 +22,9 @@ add_subdirectory(sample03)
 # 使用 texture array 來儲存圖片
 # 搭配 SSBO 來儲存 bindless texture 的 handle
 add_subdirectory(sample04)
+
+# 延遲渲染
+add_subdirectory(sample05)
+
+# 向前渲染
+add_subdirectory(sample06)
