@@ -23,8 +23,12 @@ add_subdirectory(sample03)
 # 搭配 SSBO 來儲存 bindless texture 的 handle
 add_subdirectory(sample04)
 
+# 向前渲染
+add_subdirectory(sample07)
+
+# 向前渲染，比較複雜的版本，使用了 PBR、IBL、SSAO、SSR、Bloom 等技術
+add_subdirectory(sample06)
+
 # 延遲渲染
 add_subdirectory(sample05)
 
-# 向前渲染
-add_subdirectory(sample06)

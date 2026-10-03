@@ -51,6 +51,7 @@ class Window
 			SDL_GL_SetAttribute( SDL_GL_MULTISAMPLESAMPLES, 4 );   // 設定採樣次數(通常為 4, 8 或 16，數字愈大效果愈好但愈耗效能)
 			SDL_GL_SetAttribute( SDL_GL_STENCIL_SIZE, 8 );         // 有進行 stencil test 才會需要開啟
 			SDL_GL_SetAttribute( SDL_GL_ACCELERATED_VISUAL, 1 );   // 啟用「硬體加速」，通常驅動預設就會啟用
+			SDL_GL_SetAttribute( SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1 );// Gamma 校正
 
 		#ifdef _DEBUG
 			// 要求開啟 debug context，glDebugMessageCallback 才能完整運作
@@ -152,6 +153,8 @@ class Window
 				// 確保所有訊息都會送達 callback
 				glDebugMessageControl( GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, nullptr, GL_TRUE );
 			}
+
+			glEnable( GL_FRAMEBUFFER_SRGB );
 
 			return true;
 		}

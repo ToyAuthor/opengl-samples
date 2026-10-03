@@ -8,7 +8,8 @@ class ShaderProgram
 {
 	public:
 
-		ShaderProgram( const char* vs, const char* fs )
+		ShaderProgram( std::shared_ptr<gl::Core> core, const char* vs, const char* fs )
+			: _core( core )
 		{
 			// 編譯 shader
 			GLuint vsID = CompileShader( GL_VERTEX_SHADER, vs );
@@ -51,12 +52,7 @@ class ShaderProgram
 		// 讓 GPU 使用這個 shader program 來工作
 		void use()
 		{
-			glUseProgram( _id );
-		}
-
-		void unuse()
-		{
-			glUseProgram(0);
+			_core->_bindProgram( _id );
 		}
 
 		void release()
@@ -75,6 +71,7 @@ class ShaderProgram
 
 	private:
 
+		std::shared_ptr<gl::Core> _core;
 		GLuint _id = 0;
 
 		static GLuint CompileShader( GLenum type, const char* src )

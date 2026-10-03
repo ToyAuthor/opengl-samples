@@ -9,6 +9,7 @@
  */
 
 #include <string>
+#include <memory>
 #include <fmt/core.h>             // 提供 fmt::print 來取代標準庫的 std::printf
 #include <glad/glad.h>            // 用來跟顯卡驅動程式溝通，並取出顯卡所支援的 OpenGL API 給你使用
 #include <SDL.h>                  // 負責建立視窗、處理來自作業系統的 event
@@ -17,7 +18,7 @@
 // -----------------------------------------------------------------------------
 #include "sdl/Utils.hpp"          // 提供一些基於 SDL2 的通用工具
 #include "sdl/Window.hpp"         // 將 SDL2 的視窗工作、OpenGL 初始行為給包裝起來
-#include "gl/Utils.hpp"           // 提供一些基於 OpenGL 的通用工具
+#include "gl/Core.hpp"            // 提供一些基於 OpenGL 的通用工具，也是 OpenGL 輔助工具的入口
 #include "gl/ShaderProgram.hpp"   // 將 OpenGL 編譯著色語言的手續給包裝起來
 
 namespace{
@@ -63,10 +64,8 @@ constexpr float Vertices[] = {
 	-0.5f, -0.5f, 0.0f,  0.0f, 0.0f, 1.0f     // 左下 (藍)
 };
 
-int main2()
+int main2( sdl::Window& app, std::shared_ptr<gl::Core> core )
 {
-	sdl::Window app;   // 使用 SDL2 來建立視窗
-
 	if ( false == app.init( "sample 01", 800, 600 ) )
 	{
 		fmt::print( "視窗建立失敗\n" );
@@ -74,7 +73,7 @@ int main2()
 	}
 
 	// 將著色器程式碼編譯成 GPU 可用的著色器(shader)
-	gl::ShaderProgram   myShader( VertexShaderSource, FragmentShaderSource );
+	gl::ShaderProgram   myShader( core, VertexShaderSource, FragmentShaderSource );
 
 	//--------------------------------------------------------------------------
 
@@ -139,7 +138,7 @@ int main2()
 			if ( event.type == SDL_QUIT ) quit = true;
 		}
 
-		gl::ClearScreen();
+		core->clear();
 
 		const float timeValue = sdl::GetTick();
 
@@ -151,7 +150,7 @@ int main2()
 
 		myShader.use();                       // 趕在開始描繪之前綁定 shader
 		glBindVertexArray( VAO );             // 趕在開始描繪之前綁定 VAO，這樣 OpenGL 才知道要怎麼去解讀 VBO 的數據資料
-		glDrawArrays( GL_TRIANGLES, 0, 3 );   // 以 GL_TRIANGLES 的規則來進行描繪，會使用之前已經設定好的數據資料
+		glDrawArrays( GL_TRIANGLES, 0, 3 );   // 以 GL_TRIANGLES 的規則來進行描繪(非同步)，會使用之前已經設定好的數據資料
 
 		/*
 		 * 更新螢幕
@@ -179,7 +178,11 @@ int main()
 	try
 	{
 		fmt::print( "執行程式\n" );
-		result = main2();
+
+		sdl::Window   app;      // 使用 SDL2 來建立視窗
+		auto          core = std::make_shared<gl::Core>();     // OpenGL 輔助工具
+
+		result = main2( app, core );
 	}
 	catch ( const std::exception& e )
 	{

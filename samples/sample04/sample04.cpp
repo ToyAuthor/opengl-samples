@@ -15,6 +15,7 @@
 
 #include <cstring>
 #include <cstdint>
+#include <memory>
 #include <fmt/core.h>
 #include <glad/glad.h>
 #include <SDL.h>
@@ -189,9 +190,15 @@ bool BuildTextureArrayWithPBO(
 	return manager.finalize();
 }
 
-int main3( sdl::Window& app, std::shared_ptr<gl::Core> core )
+int main2( sdl::Window& app, std::shared_ptr<gl::Core> core )
 {
-	gl::ShaderProgram   myShader( VertexShaderSource, FragmentShaderSource );
+	if ( false == app.init( "sample 04", WindowWidth, WindowHeight ) )
+	{
+		fmt::print( "視窗建立失敗\n" );
+		return EXIT_FAILURE;
+	}
+
+	gl::ShaderProgram   myShader( core, VertexShaderSource, FragmentShaderSource );
 
 	//--------------------------------------------------------------------------
 
@@ -450,21 +457,6 @@ int main3( sdl::Window& app, std::shared_ptr<gl::Core> core )
 	return EXIT_SUCCESS;
 }
 
-int main2()
-{
-	sdl::Window app;
-
-	if ( false == app.init( "sample 04", WindowWidth, WindowHeight ) )
-	{
-		fmt::print( "視窗建立失敗\n" );
-		return EXIT_FAILURE;
-	}
-
-	auto core = std::make_shared<gl::Core>();
-
-	return main3( app, core );
-}
-
 }
 
 #undef main
@@ -475,7 +467,11 @@ int main()
 	try
 	{
 		fmt::print( "執行程式\n" );
-		result = main2();
+
+		sdl::Window   app;
+		auto          core = std::make_shared<gl::Core>();
+
+		result = main2( app, core );
 	}
 	catch ( const std::exception& e )
 	{

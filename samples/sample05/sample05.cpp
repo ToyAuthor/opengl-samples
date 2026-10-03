@@ -14,12 +14,13 @@
  * 所有貼圖都由程式自行產生，不需準備任何圖檔
  */
 
-#include <array>
 #include <cmath>
 #include <cstring>
 #include <random>
 #include <string>
+#include <array>
 #include <vector>
+#include <memory>
 #include <fmt/core.h>
 #include <glad/glad.h>
 #include <SDL.h>
@@ -258,8 +259,7 @@ const char* LightingFS = R"(
 		           + albedo * diff * lightColor * atten
 		           + vec3( 0.35 ) * spec * lightColor * atten;
 
-		// 簡單的 gamma 校正，讓暗部的 AO 變化看得更清楚
-		FragColor = vec4( pow( color, vec3( 1.0 / 2.2 ) ), 1.0 );
+		FragColor = vec4( color, 1.0 );
 	}
 )";
 
@@ -433,12 +433,18 @@ void HandleKeyboardInput( gl::Camera& camera, float deltaTime )
 
 //------------------------------------------------------------------------------
 
-int main3( sdl::Window& app, std::shared_ptr<gl::Core> core )
+int main2( sdl::Window& app, std::shared_ptr<gl::Core> core )
 {
-	gl::ShaderProgram geometryShader( GeometryVS,   GeometryFS );
-	gl::ShaderProgram ssaoShader    ( FullscreenVS, SSAOFS );
-	gl::ShaderProgram blurShader    ( FullscreenVS, BlurFS );
-	gl::ShaderProgram lightingShader( FullscreenVS, LightingFS );
+	if ( false == app.init( "sample 05", WindowWidth, WindowHeight ) )
+	{
+		fmt::print( "視窗建立失敗\n" );
+		return EXIT_FAILURE;
+	}
+
+	gl::ShaderProgram geometryShader( core, GeometryVS,   GeometryFS );
+	gl::ShaderProgram ssaoShader    ( core, FullscreenVS, SSAOFS );
+	gl::ShaderProgram blurShader    ( core, FullscreenVS, BlurFS );
+	gl::ShaderProgram lightingShader( core, FullscreenVS, LightingFS );
 
 	//--------------------------------------------------------------------------
 	// 幾何：一個立方體的頂點資料，靠不同的 model 矩陣重複使用
@@ -793,21 +799,6 @@ int main3( sdl::Window& app, std::shared_ptr<gl::Core> core )
 	return EXIT_SUCCESS;
 }
 
-int main2()
-{
-	sdl::Window app;
-
-	if ( false == app.init( "sample 05", WindowWidth, WindowHeight ) )
-	{
-		fmt::print( "視窗建立失敗\n" );
-		return EXIT_FAILURE;
-	}
-
-	auto core = std::make_shared<gl::Core>();
-
-	return main3( app, core );
-}
-
 }
 
 #undef main
@@ -818,7 +809,11 @@ int main()
 	try
 	{
 		fmt::print( "執行程式\n" );
-		result = main2();
+
+		sdl::Window   app;
+		auto          core = std::make_shared<gl::Core>();
+
+		result = main2( app, core );
 	}
 	catch ( const std::exception& e )
 	{

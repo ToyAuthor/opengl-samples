@@ -215,6 +215,7 @@ void gl::StreamingBuffer::bindRange( GLuint bindingIndex ) const
 		return;
 	}
 
+	// 將 buffer 其中一塊指定區域綁定到指定 binding point，供 shader 取用
 	glBindBufferRange( _target, bindingIndex, _bufferId, getCurrentOffset(), static_cast<GLsizeiptr>( _slotSize ) );
 }
 

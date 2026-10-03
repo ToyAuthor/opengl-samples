@@ -4,9 +4,9 @@ namespace gl{
 
 /*
  * OpenGL 使用全域狀態來管理顯卡
- * 我這邊刻意將這種全域操作又包裝成一個物件
- * 為了強調資源的生命週期，避免忘記釋放資源
- * 就用這個 Core 物件來代表整個顯卡
+ * 我這邊刻意將這種全域操作包裝成一個物件
+ * 為了明確管制資源的生命週期，避免忘記釋放資源
+ * 讓 OpenGL 的使用介面變成 C++ 風格
  */
 class Core
 {
@@ -29,7 +29,7 @@ class Core
 		}
 
 	private:
-	
+
 		GLuint _id_VAO = 0;  // 紀錄目前綁定的 VAO ID，避免重複綁定
 
 	//--------------------------------------------------------------------------
@@ -54,6 +54,26 @@ class Core
 	private:
 
 		GLfloat _clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+
+
+	//--------------------------------------------------------------------------
+
+	public:
+
+		// 這函式交給 gl::ShaderProgram 內部來呼叫
+		void _bindProgram( GLuint id_program )
+		{
+			if ( _id_program != id_program )
+			{
+				_id_program = id_program;
+				glUseProgram( _id_program );
+			}
+		}
+
+	private:
+
+		GLuint _id_program = 0;  // 紀錄目前綁定的 shader program ID，避免重複綁定
+	//--------------------------------------------------------------------------
 };
 
 }
